@@ -36,7 +36,7 @@ void MQ7::calibrate() {
 	#ifndef _R0	// if no hardcoded R0 value
 
 	for (int i = 0; i <= CALIBRATION_SECONDS; i++) {
-		delay(1000);
+		delay(10);
 		R0 = readRs() / _CALIBRATION_CONSTANT;
 	}
 

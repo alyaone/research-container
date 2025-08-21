@@ -28,6 +28,10 @@ DHT dht(DHTPIN, DHTTYPE); // DHT sensor object, initialized with pin and type
 // --- Global Variables for Sensor Data and Timing ---
 int packetCounter = 0; // Counter for LoRa packets sent
 
+// Magnetic sensor variables
+bool magneticValue;
+const char* magneticStatus;
+
 // Timers for non-blocking operations using millis()
 unsigned long lastDhtReadMillis = 0;
 const long DHT_READ_INTERVAL = 2000; // Read DHT every 2 seconds (2000 ms)

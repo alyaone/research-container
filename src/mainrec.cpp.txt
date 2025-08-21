@@ -1,0 +1,70 @@
+//receiver
+#include <SPI.h>
+#include <LoRa.h>
+
+//define the pins used by the transceiver module
+// These pins should match the sender's configuration.
+#define ss 13
+#define rst 12
+#define dio0 4
+
+void setup() {
+  // initialize Serial Monitor
+  Serial.begin(115200);
+  while (!Serial);
+  Serial.println("\n📡 LoRa Receiver Node Starting...");
+
+  // setup LoRa transceiver module
+  LoRa.setPins(ss, rst, dio0);
+
+  // set the frequency to match the sender
+  // This must be identical to the frequency in your main.cpp
+  while (!LoRa.begin(865.0625E6)) {
+    Serial.println("LoRa initialization failed. Retrying...");
+    delay(10);
+  }
+  
+  // Set the sync word to match the sender
+  LoRa.setSyncWord(0xF3);
+  
+  Serial.println("LoRa Initialized OK!");
+  Serial.println("Ready to receive packets.");
+}
+
+void loop() {
+  // Check for an incoming LoRa packet. The parsePacket() function
+  // returns the size of the packet if one is received, or 0 if not.
+  int packetSize = LoRa.parsePacket();
+  
+  if (packetSize) {
+    // A packet was received
+    Serial.println("\n✅ LoRa packet received!");
+    
+    // Create a String to hold the received data
+    String receivedData = "";
+    
+    // Read the packet data byte by byte
+    while (LoRa.available()) {
+      receivedData += (char)LoRa.read();
+    }
+    
+    // Print the received data and packet information
+    Serial.print("Packet size: ");
+    Serial.print(packetSize);
+    Serial.print (" bytes");
+    Serial.print('\t'); Serial.print("RSSI: ");
+    Serial.print(LoRa.packetRssi());
+    Serial.print(" dBm");
+    
+    // The SNR function is part of the LoRa library
+    Serial.print('\t'); Serial.print("SNR: ");
+    Serial.print(LoRa.packetSnr());
+    Serial.println(" dB");
+
+    Serial.println("--- Received Data ---");
+    Serial.println(receivedData);
+    Serial.println("---------------------");
+    Serial.println();
+
+  } delay(10);
+}

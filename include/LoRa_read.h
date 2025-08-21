@@ -19,7 +19,7 @@ void setup_lora() {
   
   while (!LoRa.begin(865.0625E6)) {
     Serial.println(".");
-    delay(500);
+    delay(10);
   }
    // Change sync word (0xF3) to match the receiver
   // The sync word assures you don't get LoRa messages from other LoRa transceivers
@@ -40,5 +40,5 @@ void loop_lora() {
 
   counter++;
 
-  delay(10000);
+  delay(10);
 }

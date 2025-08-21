@@ -122,5 +122,5 @@ void loop() {
   Aceton  | 34.668 | -3.369
   */
 
-  delay(500); //Sampling frequency
+  delay(10); //Sampling frequency
 }
