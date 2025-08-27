@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#define Sensor 2
+#define Sensor 35
 
  
 void setup_magnetic() {

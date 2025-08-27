@@ -4,9 +4,9 @@
 
 //define the pins used by the transceiver module
 // These pins should match the sender's configuration.
-#define ss 13
-#define rst 12
-#define dio0 4
+#define ss 5
+#define rst 13
+#define dio0 25
 
 void setup() {
   // initialize Serial Monitor

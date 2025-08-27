@@ -7,6 +7,7 @@
 
 #include "MQ7.h"
 #include "Arduino.h"
+#include <defines.h>
 
 float MQ7::readPpm() {
 	return (float) _COEF_A0 * pow(

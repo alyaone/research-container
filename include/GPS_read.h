@@ -1,4 +1,3 @@
-#include <TinyGPSPlus.h>
 #include <HardwareSerial.h> // Include HardwareSerial for Serial2
 #include "defines.h"      // Include defines.h for global definitions and objects
 

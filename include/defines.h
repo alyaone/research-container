@@ -2,11 +2,12 @@
 #include <LoRa.h>      // LoRa library
 #include <TinyGPSPlus.h> // GPS parsing library
 #include "DHT.h"       // DHT sensor library
-
+#include "MQ7.h"      // MQ7 gas sensor library
+#include <MQUnifiedsensor.h>   // MQ135 gas sensor library
 // --- LoRa Module Definitions ---
-#define ss 13    // SS (Slave Select) pin for LoRa module
+#define ss 5    // SS (Slave Select) pin for LoRa module
 #define rst 12   // RST (Reset) pin for LoRa module
-#define dio0 4   // DIO0 pin for LoRa module (Interrupt pin)
+#define dio0 25   // DIO0 pin for LoRa module (Interrupt pin)
 
 
 // --- GPS Module Definitions ---
@@ -17,8 +18,16 @@
 // not as a simple #define.
 
 // --- DHT22 Sensor Definitions ---
-#define DHTPIN 5     // Digital pin connected to the DHT sensor
+#define DHTPIN 13     // Digital pin connected to the DHT sensor
 #define DHTTYPE DHT22 // Type of DHT sensor (DHT11, DHT22, DHT21)
+
+//Pin Sensor Gas
+//--MQ7
+#define MQ7_PIN 34 // sesuaikan lg sma gpio
+MQ7 mq7(MQ7_PIN);
+//--MQ135    
+// (ada di include/MQ135_read.h)      
+//MQUnifiedsensor MQ135("ESP-32", 5, 12, 16, "MQ-135"); note: yang  ke-4 dari kiri
 
 // --- Global Objects ---
 TinyGPSPlus gps; // GPS object to parse NMEA sentences
@@ -40,11 +49,18 @@ unsigned long lastLoRaSendMillis = 0;
 const long LORA_SEND_INTERVAL = 10000; // Send LoRa packet every 10 seconds (10000 ms)
 
 // Variables to store current sensor readings
-float currentHumidity = 0.0;
-float currentTemperatureC = 0.0;
 double currentLatitude = 0.0;
 double currentLongitude = 0.0;
 float currentAltitude = 0.0; // In meters
 float currentSpeed = 0.0;    // In km/h
 int currentSatellites = 0;
 String currentTimeUTC = "N/A"; // Store GPS time as a string
+
+
+//gas yang dibaca
+float coPPM = 0;
+float aqiCO2 = 0;
+float alcoholPPM = 0;
+float toluenPPM = 0;
+float nh4PPM = 0;
+float acetonPPM = 0;

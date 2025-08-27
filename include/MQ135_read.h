@@ -24,19 +24,21 @@
 //Include the library
 #include <MQUnifiedsensor.h>
 
+
 //Definitions
 #define placa "Arduino UNO"
 #define Voltage_Resolution 5
-#define pin A0 //Analog input 0 of your arduino
+#define pin 33 //Analog input 0 of your arduino
 #define type "MQ-135" //MQ135
 #define ADC_Bit_Resolution 10 // For arduino UNO/MEGA/NANO
 #define RatioMQ135CleanAir 3.6//RS / R0 = 3.6 ppm  
 //#define calibration_button 13 //Pin to calibrate your sensor
 
-//Declare Sensor
-MQUnifiedsensor MQ135(placa, Voltage_Resolution, ADC_Bit_Resolution, pin, type);
+//Sensor objects
+MQUnifiedsensor MQ135("ESP-32", 5, 12, pin, "MQ-135"); // ESP32 has 12-bit ADC
 
-void setup() {
+
+void setup_mq135() {
   //Init the serial port communication - to debug the library
   Serial.begin(9600); //Init serial port
 
@@ -76,7 +78,7 @@ void setup() {
   Serial.println("|    CO   |  Alcohol |   CO2  |  Toluen  |  NH4  |  Aceton  |");  
 }
 
-void loop() {
+void loop_mq135() {
   MQ135.update(); // Update data, the arduino will read the voltage from the analog pin
   float correctionFactor = 0; // Optional environmental correction
 
