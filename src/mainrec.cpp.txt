@@ -1,17 +1,42 @@
-//receiver
+//Receiver Code
+
 #include <SPI.h>
 #include <LoRa.h>
 
-//define the pins used by the transceiver module
+// Define the pins used by the transceiver module
 // These pins should match the sender's configuration.
 #define ss 5
 #define rst 13
 #define dio0 25
 
+// --- IMPORTANT: This struct MUST be identical to the sender's LoRaData struct ---
+// Define a structure to hold your data
+struct LoRaData {
+  uint8_t packetCounter;
+  float humidity;
+  float temperatureC;
+  double latitude;
+  double longitude;
+  float altitude;
+  float speed;
+  uint8_t satellites;
+  char timeUTC[9]; // HHMMSS.ms (e.g., "123456.78") + null terminator
+  uint8_t magneticStatus; // 0 for CLOSED, 1 for OPEN (based on sender's conversion)
+  float coPPM;
+  float aqiCO2;
+  float alcoholPPM;
+  float toluenPPM;
+  float nh4PPM;
+  float acetonPPM;
+};
+
+// Create an instance of the struct to store the received data
+LoRaData receivedData;
+
 void setup() {
   // initialize Serial Monitor
   Serial.begin(115200);
-  while (!Serial);
+  while (!Serial); // Wait for serial port to connect. Needed for native USB port only.
   Serial.println("\n📡 LoRa Receiver Node Starting...");
 
   // setup LoRa transceiver module
@@ -23,10 +48,10 @@ void setup() {
     Serial.println("LoRa initialization failed. Retrying...");
     delay(10);
   }
-  
+
   // Set the sync word to match the sender
   LoRa.setSyncWord(0xF3);
-  
+
   Serial.println("LoRa Initialized OK!");
   Serial.println("Ready to receive packets.");
 }
@@ -35,36 +60,100 @@ void loop() {
   // Check for an incoming LoRa packet. The parsePacket() function
   // returns the size of the packet if one is received, or 0 if not.
   int packetSize = LoRa.parsePacket();
-  
+
   if (packetSize) {
-    // A packet was received
     Serial.println("\n✅ LoRa packet received!");
-    
-    // Create a String to hold the received data
-    String receivedData = "";
-    
-    // Read the packet data byte by byte
-    while (LoRa.available()) {
-      receivedData += (char)LoRa.read();
+
+    // Read the entire packet directly into the 'receivedData' struct
+    int bytesRead = LoRa.readBytes((byte*)&receivedData, sizeof(receivedData));
+
+    // Verify if the received packet size matches the expected struct size
+    if (bytesRead == sizeof(receivedData)) {
+      // Print the received data and packet information
+      Serial.print("\n------ Receive Data Packet #");
+      Serial.print(receivedData.packetCounter);
+      Serial.println("------");
+      Serial.print("Packet size: ");
+      Serial.print(packetSize);
+      Serial.println(" bytes");
+      Serial.print("RSSI: ");
+      Serial.print(LoRa.packetRssi());
+      Serial.println(" dBm");
+      Serial.print("SNR: ");
+      Serial.print(LoRa.packetSnr());
+      Serial.println(" dB");
+      Serial.println();
+
+      Serial.print("Hum: "); 
+      Serial.print(receivedData.humidity, 2); 
+      Serial.print("% "); Serial.print('\t'); Serial.print("  | "); 
+      Serial.print("Temp: ");
+      Serial.print(receivedData.temperatureC, 2);
+      Serial.println("C");
+      Serial.println();
+
+      Serial.print("Lat: ");
+      Serial.print(receivedData.latitude, 6); Serial.print('\t'); Serial.print("  |  ");
+
+      Serial.print("Long: ");
+      Serial.println(receivedData.longitude, 6); 
+
+      Serial.print("Alt: ");
+      Serial.print(receivedData.altitude, 2);
+      Serial.print("m"); Serial.print('\t'); Serial.print("  |  ");
+
+      Serial.print("Speed: ");
+      Serial.print(receivedData.speed, 2);
+      Serial.println("km/h");
+
+      Serial.print("Satellites: ");
+      Serial.print(receivedData.satellites); Serial.print('\t'); Serial.print("  |  ");
+
+      Serial.print("Time UTC: ");
+      Serial.println(receivedData.timeUTC);
+      Serial.println();
+
+      Serial.print("Magnetic: ");
+      // Convert the received uint8_t back to a descriptive string
+      if (receivedData.magneticStatus == 1) {
+        Serial.println("CLOSED");
+      } else if (receivedData.magneticStatus == 0) {
+        Serial.println("OPEN");
+      } else {
+        Serial.print("UNKNOWN (");
+        Serial.print(receivedData.magneticStatus);
+        Serial.println(")");
+      } 
+
+      Serial.println();
+
+      Serial.print("CO PPM: ");
+      Serial.print(receivedData.coPPM); Serial.print('\t'); Serial.print("  |  ");
+
+      Serial.print("CO2 (PPM): ");
+      Serial.println(receivedData.aqiCO2);
+
+      Serial.print("Alc (PPM): ");
+      Serial.print(receivedData.alcoholPPM); Serial.print('\t'); Serial.print("  |  ");
+
+      Serial.print("Toluen (PPM): ");
+      Serial.println(receivedData.toluenPPM);
+
+      Serial.print("NH4 (PPM): ");
+      Serial.print(receivedData.nh4PPM); Serial.print('\t'); Serial.print("  |  ");
+
+      Serial.print("Aceton (PPM): ");
+      Serial.println(receivedData.acetonPPM);
+
+      Serial.println("---------------------------------------------\n");
+
+    } else {
+      Serial.println("Error: Received packet size mismatch or incomplete data.");
+      // Optional: Read remaining bytes if packet was larger than expected
+      while (LoRa.available()) {
+        LoRa.read();
+      }
     }
-    
-    // Print the received data and packet information
-    Serial.print("Packet size: ");
-    Serial.print(packetSize);
-    Serial.print (" bytes");
-    Serial.print('\t'); Serial.print("RSSI: ");
-    Serial.print(LoRa.packetRssi());
-    Serial.print(" dBm");
-    
-    // The SNR function is part of the LoRa library
-    Serial.print('\t'); Serial.print("SNR: ");
-    Serial.print(LoRa.packetSnr());
-    Serial.println(" dB");
-
-    Serial.println("--- Received Data ---");
-    Serial.println(receivedData);
-    Serial.println("---------------------");
-    Serial.println();
-
-  } delay(10);
+  }
+  delay(10);
 }

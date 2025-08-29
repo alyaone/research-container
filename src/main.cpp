@@ -15,43 +15,81 @@ void readGPSData();
 void sendLoRaPacket();
 void readMagneticSensor();
 
-//DHT-function
-void readDHTSensor() {
-    float h = dht.readHumidity();
-    float t = dht.readTemperature();
+// //DHT-function
+// void readDHTSensor() {
+//     float h = dht.readHumidity();
+//     float t = dht.readTemperature();
 
-    if (isnan(h) || isnan(t)) {
-        Serial.println(F("Failed to read from DHT sensor!"));
-        return;
-    }
+//     if (isnan(h) || isnan(t)) {
+//         Serial.println(F("Failed to read from DHT sensor!"));
+//         return;
+//     }
 
-    //update humidity and temp
-    currentHumidity = h;
-    currentTemperatureC = t;
+//     //update humidity and temp
+//     currentHumidity = h;
+//     currentTemperatureC = t;
 
-    // Serial.print(F("Humidity: "));
-    // Serial.print(currentHumidity);
-    // Serial.print(F("%  Temperature: "));
-    // Serial.print(currentTemperatureC);
-    // Serial.println(F("°C"));
-}
+//     // Serial.print(F("Humidity: "));
+//     // Serial.print(currentHumidity);
+//     // Serial.print(F("%  Temperature: "));
+//     // Serial.print(currentTemperatureC);
+//     // Serial.println(F("°C"));
+// }
 
 // GPS-function
 void readGPSData() {
     while (gpsSerial.available() > 0) {
         if (gps.encode(gpsSerial.read())) {
             if (gps.location.isUpdated()) {
-                currentLatitude = gps.location.lat(); // Latitude 
-                currentLongitude = gps.location.lng(); // Longitude
-                currentAltitude = gps.altitude.meters(); // Altitude (m)
-                currentSpeed = gps.speed.kmph(); // Speed (km/h)
-                currentSatellites = gps.satellites.value(); //Number of satellites 
+                currentLatitude = gps.location.lat();
+                currentLongitude = gps.location.lng();
+                currentAltitude = gps.altitude.meters();
+                currentSpeed = gps.speed.kmph();
+                currentSatellites = gps.satellites.value();
 
-                
-                char timeStr[20]; // Buffer to hold the formatted time string
+                // Get UTC time and date components
+                int utcYear = gps.date.year();
+                int utcMonth = gps.date.month();
+                int utcDay = gps.date.day();
+                int utcHour = gps.time.hour();
+                int utcMinute = gps.time.minute();
+                int utcSecond = gps.time.second();
+
+                // Add 7 hours to convert to UTC+7
+                int localHour = utcHour + 7;
+                int localDay = utcDay;
+                int localMonth = utcMonth;
+                int localYear = utcYear;
+
+                // Handle the day and month rollover
+                if (localHour >= 24) {
+                    localHour -= 24;
+                    localDay++;
+
+                    // Handle month rollover (e.g., end of month)
+                    if (localDay > 31 && (localMonth == 1 || localMonth == 3 || localMonth == 5 || localMonth == 7 || localMonth == 8 || localMonth == 10 || localMonth == 12)) {
+                        localDay = 1;
+                        localMonth++;
+                    } else if (localDay > 30 && (localMonth == 4 || localMonth == 6 || localMonth == 9 || localMonth == 11)) {
+                        localDay = 1;
+                        localMonth++;
+                    } else if (localDay > 28 && localMonth == 2) {
+                        // This handles a simple case. Leap years would require more complex logic.
+                        localDay = 1;
+                        localMonth++;
+                    }
+
+                    // Handle year rollover
+                    if (localMonth > 12) {
+                        localMonth = 1;
+                        localYear++;
+                    }
+                }
+
+                char timeStr[20];
                 sprintf(timeStr, "%04d/%02d/%02d,%02d:%02d:%02d",
-                        gps.date.year(), gps.date.month(), gps.date.day(),
-                        gps.time.hour(), gps.time.minute(), gps.time.second());
+                        localYear, localMonth, localDay,
+                        localHour, utcMinute, utcSecond);
                 currentTimeUTC = String(timeStr);
 
                 // Print updated GPS data to the Serial Monitor.
@@ -61,24 +99,23 @@ void readGPSData() {
                 Serial.print("   ALT (m): "); Serial.print(currentAltitude, 2); Serial.println("\t");
                 Serial.print("   SPEED (km/h): "); Serial.println(currentSpeed, 2);
                 Serial.print("   Satellites: "); Serial.print(currentSatellites); Serial.println("\t");
-                Serial.print("   Time UTC: "); Serial.println(currentTimeUTC);
+                Serial.print("   Time UTC+7: "); Serial.println(currentTimeUTC);
                 Serial.println();
             }
         }
     }
 
-    // --- GPS No Data Warning ---
+    // --- Corrected GPS No Data Warning ---
     static unsigned long lastNoDataWarningTime = 0;
-    const unsigned long NO_DATA_WARNING_INTERVAL_MS = 10;
+    const unsigned long NO_DATA_WARNING_INTERVAL_MS = 5000; // Recommended: 5 seconds
     unsigned long currentMillis = millis();
 
-
-    if (currentMillis > NO_DATA_WARNING_INTERVAL_MS && gps.charsProcessed() < 10) {
+    if (gps.charsProcessed() < 10) { // Check if no data is being processed
         if (currentMillis - lastNoDataWarningTime >= NO_DATA_WARNING_INTERVAL_MS) {
             Serial.println("No GPS data detected! Ensure the module is properly connected.");
-            lastNoDataWarningTime = currentMillis; 
-        } 
-    } delay (10);
+            lastNoDataWarningTime = currentMillis;
+        }
+    }
 }
 void readMagneticSensor() {
     magneticValue = digitalRead(Sensor);
@@ -91,9 +128,9 @@ void readMagneticSensor() {
             magneticStatus = "No Magnet Detected";
         }
 
-        Serial.print("Magnetic Sensor Status: ");
-        Serial.println(magneticStatus);
-        Serial.println();
+        // Serial.print("Magnetic Sensor Status: ");
+        // Serial.println(magneticStatus);
+        // Serial.println();
 
         lastMagneticValue = magneticValue;
     }
@@ -139,57 +176,94 @@ void readMQ135Sensor() {
 
 // LoRa sending packets function
 void sendLoRaPacket() {
-    packetCounter++; 
+    
+    packetCounter++;      // Increment packet counter
 
-    String message = "Packet #";
-    message += packetCounter;
-    //from AHT
-    message += "\nHumidity: ";
-    message += String(currentHumidity, 2);
-    message += "%\nTemperature: ";
-    message += String(currentTemperatureC, 2);
-    message += "C\nLatitude: ";
-    //from GPS
-    message += String(currentLatitude, 6);
-    message += "\nLongitude: ";
-    message += String(currentLongitude, 6);
-    message += "\nAltitude: ";
-    message += String(currentAltitude, 2);
-    message += "m\nSpeed: ";
-    message += String(currentSpeed, 2);
-    message += "km/h\nSatellites: ";
-    message += String(currentSatellites);
-    message += "\nTime UTC: ";
-    message += currentTimeUTC;
-    //from magnetic sensor
-    message += "\nMagnetic Sensor: ";
-    message += magneticStatus;
-    //from MQ sensors
-    message += "\nCO PPM: ";
-    message += String(coPPM);
-    message += "\nCO2 (PPM): ";
-    message += String(aqiCO2);
-    message += "\nAlcohol (PPM): ";
-    message += String(alcoholPPM);      
-    message += "\nToluen (PPM): ";
-    message += String(toluenPPM);
-    message += "\nNH4 (PPM): ";
-    message += String(nh4PPM);
-    message += "\nAceton (PPM): ";
-    message += String(acetonPPM);
+  // Populate the struct with current data, performing necessary type conversions
+  dataToSend.packetCounter = (uint8_t)packetCounter; // Cast int to uint8_t
+  dataToSend.humidity = currentHumidity;
+  dataToSend.temperatureC = currentTemperatureC;
+  dataToSend.latitude = currentLatitude;
+  dataToSend.longitude = currentLongitude;
+  dataToSend.altitude = currentAltitude;
+  dataToSend.speed = currentSpeed;
+  dataToSend.satellites = (uint8_t)currentSatellites; // Cast int to uint8_t
 
-    // Print the message to the Serial Monitor before sending via LoRa.
-    Serial.print("LoRa packet..... (");
-    Serial.print(message.length()); 
-    Serial.print(" bytes): \n");
-    Serial.println(message);
+  // Convert String (currentTimeUTC) to C-style string (char[]) for strncpy
+  strncpy(dataToSend.timeUTC, currentTimeUTC.c_str(), sizeof(dataToSend.timeUTC) - 1);
+  dataToSend.timeUTC[sizeof(dataToSend.timeUTC) - 1] = '\0'; // Ensure null termination
 
-    LoRa.beginPacket();
-    LoRa.print(message);
-    LoRa.endPacket();
+  // Convert const char* (magneticStatus) to uint8_t.
+  // Assuming "OPEN" is 1 and "CLOSED" is 0, or similar logic.
+  // You might need to adjust this logic based on actual magneticStatus string values.
+  if (strcmp(magneticStatus, "No Magnet Detected") == 0) { // Example check
+    dataToSend.magneticStatus = 0;
+  } else if (strcmp(magneticStatus, "Magnet Detected") == 0) { // Example check
+    dataToSend.magneticStatus = 1;
+  } else {
+    dataToSend.magneticStatus = 255; // Default/error value, or other specific mapping
+  }
 
-    Serial.println("LoRa packet sent!");
+  // Cast float PPM values to uint16_t. This will truncate any decimal parts.
+  dataToSend.coPPM = (float)coPPM;
+  dataToSend.aqiCO2 = (float)aqiCO2;
+  dataToSend.alcoholPPM = (float)alcoholPPM;
+  dataToSend.toluenPPM = (float)toluenPPM;
+  dataToSend.nh4PPM = (float)nh4PPM;
+  dataToSend.acetonPPM = (float)acetonPPM;
+
+    Serial.print("\n----- Transmitting Data Packet # ");
+    Serial.print(dataToSend.packetCounter);
+    Serial.println ("-----");
+    int packetSize = sizeof(dataToSend);
+    Serial.print("Packet size: ");
+    Serial.print(packetSize);
+    Serial.println(" bytes");
+    Serial.print("Hum: "); 
+    Serial.print(dataToSend.humidity, 2);
+    Serial.print("%"); Serial.print('\t'); Serial.print("  |  ");
+    Serial.print("Temp: ");
+    Serial.print(dataToSend.temperatureC, 2);
+    Serial.println("C");
     Serial.println();
+    Serial.print("Lat: ");
+    Serial.print(dataToSend.latitude, 6); Serial.print('\t'); Serial.print("  |  ");
+    Serial.print("Long: ");
+    Serial.print(dataToSend.longitude, 6);
+    Serial.println();
+    Serial.print("Alt: ");
+    Serial.print(dataToSend.altitude, 2); 
+    Serial.print("m"); Serial.print('\t'); Serial.print("  |  ");
+    Serial.print("Speed: ");
+    Serial.print(dataToSend.speed, 2);
+    Serial.println("km/h");
+    Serial.print("Satellites: ");
+    Serial.print(dataToSend.satellites); Serial.print('\t'); Serial.print("  |  ");
+    Serial.print("Time UTC: ");
+    Serial.println(dataToSend.timeUTC);
+    Serial.println();
+    Serial.print("Magnetic: ");
+    Serial.println(dataToSend.magneticStatus); Serial.println();
+    Serial.print("CO PPM: "); 
+    Serial.print(dataToSend.coPPM); Serial.print('\t'); Serial.print("  |  ");
+    Serial.print("CO2 (PPM): ");
+    Serial.println(dataToSend.aqiCO2);
+    Serial.print("Alc (PPM): "); 
+    Serial.println(dataToSend.alcoholPPM); Serial.print('\t'); Serial.print("  |  ");
+    Serial.print("Toluen (PPM): ");
+    Serial.print(dataToSend.toluenPPM); 
+    Serial.print("NH4 (PPM): ");
+    Serial.print(dataToSend.nh4PPM); Serial.print('\t'); Serial.print("  |  ");
+    Serial.print("Aceton (PPM): ");
+    Serial.println(dataToSend.acetonPPM);
+    Serial.println("-------------------------");
+    // --- End of new code ---
+
+  // Send the struct as raw bytes
+  LoRa.beginPacket();
+  LoRa.write((byte*)&dataToSend, sizeof(dataToSend));
+  LoRa.endPacket();
+
 }
 
 
@@ -198,17 +272,17 @@ void setup() {
     while (!Serial);
     Serial.println("\n Starting Integrated LoRa-GPS-DHT Sensor Node...");
 
-    // dht setup
-    dht.begin();
-    Serial.println("DHT Sensor Initialized.");
+    // // dht setup
+    // dht.begin();
+    // Serial.println("DHT Sensor Initialized.");
 
     // gps setup
     gpsSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
     Serial.println("GPS Serial Port Initialized.");
 
-    // // Initialize AHT Sensor
-    // setupAHTSensor(); // Call the AHT sensor setup function
-    // Serial.println("AHT Sensor Initialized.");
+    // Initialize AHT Sensor
+    setupAHTSensor(); // Call the AHT sensor setup function
+    Serial.println("AHT Sensor Initialized.");
 
     // MQ-7 setup
     mq7.calibrate();
@@ -255,18 +329,18 @@ void setup() {
 void loop() {
     unsigned long currentMillis = millis(); // Get the current time for non-blocking operations
 
-    //dht reading
-    if (currentMillis - lastDhtReadMillis >= DHT_READ_INTERVAL) {
-        lastDhtReadMillis = currentMillis; // Update the last read time
-        readDHTSensor(); // Call the function to read DHT data
-    }
-
-    //AHT reading
-    // // AHT Sensor Reading
-    // if (currentMillis - lastAhtReadMillis >= AHT_READ_INTERVAL) {
-    //     lastAhtReadMillis = currentMillis; // Update the last read time
-    //     readAHTSensor();                   // Call the function to read AHT data
+    // //dht reading
+    // if (currentMillis - lastDhtReadMillis >= DHT_READ_INTERVAL) {
+    //     lastDhtReadMillis = currentMillis; // Update the last read time
+    //     readDHTSensor(); // Call the function to read DHT data
     // }
+
+
+    // AHT Sensor Reading
+    if (currentMillis - lastAhtReadMillis >= AHT_READ_INTERVAL) {
+        lastAhtReadMillis = currentMillis; // Update the last read time
+        readAHTSensor();                   // Call the function to read AHT data
+    }
     //gps reading
     readGPSData();
 

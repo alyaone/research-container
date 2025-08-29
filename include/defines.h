@@ -64,3 +64,26 @@ float alcoholPPM = 0;
 float toluenPPM = 0;
 float nh4PPM = 0;
 float acetonPPM = 0;
+
+// Define a structure to hold your data
+struct LoRaData {
+  uint8_t packetCounter;    // Original: int, now uint8_t for smaller size
+  float humidity;
+  float temperatureC;
+  double latitude;
+  double longitude;
+  float altitude;
+  float speed;
+  uint8_t satellites;       // Original: int, now uint8_t for smaller size
+  char timeUTC[9];          // HHMMSS.ms (e.g., "123456.78") + null terminator. Adjust size if format changes.
+  uint8_t magneticStatus;   // Original: const char*, now uint8_t (will be converted, e.g., 0/1)
+  float coPPM;           // Original: float, now float (decimal part truncated)
+  float aqiCO2;          // Original: float, now float (decimal part truncated)
+  float alcoholPPM;      // Original: float, now float (decimal part truncated)
+  float toluenPPM;       // Original: float, now float (decimal part truncated)
+  float nh4PPM;          // Original: float, now float (decimal part truncated)
+  float acetonPPM;       // Original: float, now float (decimal part truncated)
+};
+
+// Create an instance of the struct that will be populated with data to send
+LoRaData dataToSend;

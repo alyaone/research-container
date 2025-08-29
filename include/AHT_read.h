@@ -40,13 +40,13 @@ void readAHTSensor() {
   currentHumidity = humidityEvent.relative_humidity;
 
   // Print the temperature and humidity values to the Serial Monitor
-  Serial.print("AHT10 Temperature: ");
-  Serial.print(currentTemperatureC);
-  Serial.println(" °C");
-  Serial.print("AHT10 Humidity: ");
-  Serial.print(currentHumidity);
-  Serial.println(" %");
-  Serial.println();
+  // Serial.print("AHT10 Temperature: ");
+  // Serial.print(currentTemperatureC);
+  // Serial.println(" °C");
+  // Serial.print("AHT10 Humidity: ");
+  // Serial.print(currentHumidity);
+  // Serial.println(" %");
+  // Serial.println();
 }
 
 
