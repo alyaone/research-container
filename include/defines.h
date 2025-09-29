@@ -4,16 +4,22 @@
 #include "DHT.h"       // DHT sensor library
 #include "MQ7.h"      // MQ7 gas sensor library
 #include <MQUnifiedsensor.h>   // MQ135 gas sensor library
+#include <esp_sleep.h>
 // --- LoRa Module Definitions ---
 #define ss 5    // SS (Slave Select) pin for LoRa module
 #define rst 12   // RST (Reset) pin for LoRa module
 #define dio0 25   // DIO0 pin for LoRa module (Interrupt pin)
+
+static const int PIN_VIB     = 34;  
+static const int PIN_GPS_EN  = -1;
+#define PWR_EN_PIN      27            // drives load switch / P-MOSFET gate
 
 
 // --- GPS Module Definitions ---
 #define RXD2 16    // RX pin for GPS module (connected to TX of GPS)
 #define TXD2 17    // TX pin for GPS module (connected to RX of GPS)
 #define GPS_BAUD 9600 // Baud rate for GPS communication
+#define GPS_HIGH 21
 // Note: 'gpsSerial' is defined as a HardwareSerial object below,
 // not as a simple #define.
 
@@ -32,6 +38,14 @@ MQ7 mq7(MQ7_PIN);
 // --- Global Objects ---
 TinyGPSPlus gps; // GPS object to parse NMEA sentences
 HardwareSerial gpsSerial(2); // Use Serial2 for GPS communication on ESP32 (pins 16 and 17)
+enum State { IDLE, ACTIVE };
+State state = IDLE;
+
+volatile bool vibEdgeFlag = false;
+volatile uint32_t vibIsrStamp = 0;
+
+uint32_t lastVibrationMs = 0;   // updated on valid vibration
+uint32_t lastSendMs      = 0;   // last LoRa send
 DHT dht(DHTPIN, DHTTYPE); // DHT sensor object, initialized with pin and type
 
 // --- Global Variables for Sensor Data and Timing ---
@@ -46,7 +60,8 @@ unsigned long lastDhtReadMillis = 0;
 const long DHT_READ_INTERVAL = 2000; // Read DHT every 2 seconds (2000 ms)
 
 unsigned long lastLoRaSendMillis = 0;
-const long LORA_SEND_INTERVAL = 10000; // Send LoRa packet every 10 seconds (10000 ms)
+const long LORA_SEND_INTERVAL = 30000; // Send LoRa packet every 10 seconds (10000 ms)
+
 
 // Variables to store current sensor readings
 double currentLatitude = 0.0;
@@ -56,6 +71,11 @@ float currentSpeed = 0.0;    // In km/h
 int currentSatellites = 0;
 String currentTimeUTC = "N/A"; // Store GPS time as a string
 
+const uint32_t INACTIVITY_PSM_MS     = 30UL * 60UL * 1000UL;  // 2 minutes without vibration -> back to PSM
+const uint32_t GPS_FIX_TIMEOUT_MS    = 90UL * 1000UL;         // wait up to 90 s for first fix
+const uint32_t VIB_DEBOUNCE_MS       = 120UL;                 // debounce for SW-420 edges
+const uint8_t UBX_PSM_ON[]  = {0xB5,0x62,0x06,0x11,0x02,0x00,0x08,0x01,0x22,0x92};
+const uint8_t UBX_PSM_OFF[] = {0xB5,0x62,0x06,0x11,0x02,0x00,0x08,0x00,0x21,0x91};
 
 //gas yang dibaca
 float coPPM = 0;
@@ -66,24 +86,17 @@ float nh4PPM = 0;
 float acetonPPM = 0;
 
 // Define a structure to hold your data
+#pragma pack(push,1)
 struct LoRaData {
-  uint8_t packetCounter;    // Original: int, now uint8_t for smaller size
-  float humidity;
-  float temperatureC;
-  double latitude;
-  double longitude;
-  float altitude;
-  float speed;
-  uint8_t satellites;       // Original: int, now uint8_t for smaller size
-  char timeUTC[9];          // HHMMSS.ms (e.g., "123456.78") + null terminator. Adjust size if format changes.
-  uint8_t magneticStatus;   // Original: const char*, now uint8_t (will be converted, e.g., 0/1)
-  float coPPM;           // Original: float, now float (decimal part truncated)
-  float aqiCO2;          // Original: float, now float (decimal part truncated)
-  float alcoholPPM;      // Original: float, now float (decimal part truncated)
-  float toluenPPM;       // Original: float, now float (decimal part truncated)
-  float nh4PPM;          // Original: float, now float (decimal part truncated)
-  float acetonPPM;       // Original: float, now float (decimal part truncated)
+  uint8_t  packetCounter;
+  double   latitude;
+  double   longitude;
+  float    altitude;
+  float    speed;
+  uint8_t  satellites;
+  char     timeUTC[20];  // enough for "YYYY/MM/DD,HH:MM:SS" + '\0'
 };
+#pragma pack(pop)
 
 // Create an instance of the struct that will be populated with data to send
 LoRaData dataToSend;

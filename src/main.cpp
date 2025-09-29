@@ -4,38 +4,6 @@
 #include <MQ7_read.h>
 #include <MQ135_read.h>
 
-// Global variable to store the previous magnetic sensor value
-int lastMagneticValue = -1; // initialize invalid value
-//for AHT
-const unsigned long AHT_READ_INTERVAL = 10; // Read AHT sensor every 5 seconds (adjust as needed)
-unsigned long lastAhtReadMillis = 0;          // Stores the last time AHT sensor was read
-
-// void readDHTSensor();
-void readGPSData();
-void sendLoRaPacket();
-void readMagneticSensor();
-
-// //DHT-function
-// void readDHTSensor() {
-//     float h = dht.readHumidity();
-//     float t = dht.readTemperature();
-
-//     if (isnan(h) || isnan(t)) {
-//         Serial.println(F("Failed to read from DHT sensor!"));
-//         return;
-//     }
-
-//     //update humidity and temp
-//     currentHumidity = h;
-//     currentTemperatureC = t;
-
-//     // Serial.print(F("Humidity: "));
-//     // Serial.print(currentHumidity);
-//     // Serial.print(F("%  Temperature: "));
-//     // Serial.print(currentTemperatureC);
-//     // Serial.println(F("°C"));
-// }
-
 // GPS-function
 void readGPSData() {
     while (gpsSerial.available() > 0) {
@@ -117,72 +85,25 @@ void readGPSData() {
         }
     }
 }
-void readMagneticSensor() {
-    magneticValue = digitalRead(Sensor);
-
-    // Only print the status if it has changed
-    if (magneticValue != lastMagneticValue) {
-        if (magneticValue == 0) {
-            magneticStatus = "Magnet Detected!";
-        } else {
-            magneticStatus = "No Magnet Detected";
-        }
-
-        // Serial.print("Magnetic Sensor Status: ");
-        // Serial.println(magneticStatus);
-        // Serial.println();
-
-        lastMagneticValue = magneticValue;
-    }
+void powerPeripherals(bool on) {
+  // If using a P-MOSFET high-side with gate pulled up to VCC through 100k:
+  //   gate LOW = ON, gate HIGH = OFF
+  pinMode(PWR_EN_PIN, OUTPUT);
+  digitalWrite(PWR_EN_PIN, on ? LOW : HIGH);
 }
 
-// //function to read MQ-7 sensor data
-void readMQ7Sensor() {
-    coPPM = mq7.readPpm();
-    // Serial.print("CO PPM: ");
-    // Serial.println(coPPM);
-}
 
-// function to read MQ-135 sensor data
-void readMQ135Sensor() {
-    MQ135.update();
-    
-    // Read and store CO2 concentration (add 400 PPM offset)
-    MQ135.setA(110.47); 
-    MQ135.setB(-2.862); 
-    aqiCO2 = MQ135.readSensor(false, 0) + 400;
-
-    // Read and store other gases
-    MQ135.setA(77.255); MQ135.setB(-3.18);
-    alcoholPPM = MQ135.readSensor(false, 0);
-
-    MQ135.setA(44.947); MQ135.setB(-3.445);
-    toluenPPM = MQ135.readSensor(false, 0);
-
-    MQ135.setA(102.2); MQ135.setB(-2.473);
-    nh4PPM = MQ135.readSensor(false, 0);
-
-    MQ135.setA(34.668); MQ135.setB(-3.369);
-    acetonPPM = MQ135.readSensor(false, 0);
-
-    // Serial.print("CO2 (PPM): "); Serial.print(aqiCO2); Serial.print("\t");
-    // Serial.print("Alcohol (PPM): "); Serial.println(alcoholPPM);
-    // Serial.print("Toluen (PPM): "); Serial.print(toluenPPM); Serial.print("\t");
-    // Serial.print("NH4 (PPM): "); Serial.print(nh4PPM); Serial.print("\t");
-    // Serial.print("Aceton (PPM): "); Serial.println(acetonPPM);
-    // Serial.println();
-    // Serial.println();
-}
 
 // LoRa sending packets function
 void sendLoRaPacket() {
-    
+    uint32_t t0 = millis();
+    while (millis() - t0 < 500) {
+    while (gpsSerial.available()) gps.encode(gpsSerial.read());
+  }
     packetCounter++;      // Increment packet counter
 
   // Populate the struct with current data, performing necessary type conversions
   dataToSend.packetCounter = (uint8_t)packetCounter; // Cast int to uint8_t
-  dataToSend.humidity = currentHumidity;
-  dataToSend.temperatureC = currentTemperatureC;
   dataToSend.latitude = currentLatitude;
   dataToSend.longitude = currentLongitude;
   dataToSend.altitude = currentAltitude;
@@ -193,24 +114,6 @@ void sendLoRaPacket() {
   strncpy(dataToSend.timeUTC, currentTimeUTC.c_str(), sizeof(dataToSend.timeUTC) - 1);
   dataToSend.timeUTC[sizeof(dataToSend.timeUTC) - 1] = '\0'; // Ensure null termination
 
-  // Convert const char* (magneticStatus) to uint8_t.
-  // Assuming "OPEN" is 1 and "CLOSED" is 0, or similar logic.
-  // You might need to adjust this logic based on actual magneticStatus string values.
-  if (strcmp(magneticStatus, "No Magnet Detected") == 0) { // Example check
-    dataToSend.magneticStatus = 0;
-  } else if (strcmp(magneticStatus, "Magnet Detected") == 0) { // Example check
-    dataToSend.magneticStatus = 1;
-  } else {
-    dataToSend.magneticStatus = 255; // Default/error value, or other specific mapping
-  }
-
-  // Cast float PPM values to uint16_t. This will truncate any decimal parts.
-  dataToSend.coPPM = (float)coPPM;
-  dataToSend.aqiCO2 = (float)aqiCO2;
-  dataToSend.alcoholPPM = (float)alcoholPPM;
-  dataToSend.toluenPPM = (float)toluenPPM;
-  dataToSend.nh4PPM = (float)nh4PPM;
-  dataToSend.acetonPPM = (float)acetonPPM;
 
     Serial.print("\n----- Transmitting Data Packet # ");
     Serial.print(dataToSend.packetCounter);
@@ -219,12 +122,6 @@ void sendLoRaPacket() {
     Serial.print("Packet size: ");
     Serial.print(packetSize);
     Serial.println(" bytes");
-    Serial.print("Hum: "); 
-    Serial.print(dataToSend.humidity, 2);
-    Serial.print("%"); Serial.print('\t'); Serial.print("  |  ");
-    Serial.print("Temp: ");
-    Serial.print(dataToSend.temperatureC, 2);
-    Serial.println("C");
     Serial.println();
     Serial.print("Lat: ");
     Serial.print(dataToSend.latitude, 6); Serial.print('\t'); Serial.print("  |  ");
@@ -242,22 +139,6 @@ void sendLoRaPacket() {
     Serial.print("Time UTC: ");
     Serial.println(dataToSend.timeUTC);
     Serial.println();
-    Serial.print("Magnetic: ");
-    Serial.println(dataToSend.magneticStatus); Serial.println();
-    Serial.print("CO PPM: "); 
-    Serial.print(dataToSend.coPPM); Serial.print('\t'); Serial.print("  |  ");
-    Serial.print("CO2 (PPM): ");
-    Serial.println(dataToSend.aqiCO2);
-    Serial.print("Alc (PPM): "); 
-    Serial.println(dataToSend.alcoholPPM); Serial.print('\t'); Serial.print("  |  ");
-    Serial.print("Toluen (PPM): ");
-    Serial.print(dataToSend.toluenPPM); 
-    Serial.print("NH4 (PPM): ");
-    Serial.print(dataToSend.nh4PPM); Serial.print('\t'); Serial.print("  |  ");
-    Serial.print("Aceton (PPM): ");
-    Serial.println(dataToSend.acetonPPM);
-    Serial.println("-------------------------");
-    // --- End of new code ---
 
   // Send the struct as raw bytes
   LoRa.beginPacket();
@@ -266,11 +147,63 @@ void sendLoRaPacket() {
 
 }
 
+void sendUBX(const uint8_t *msg, size_t len) {
+  gpsSerial.write(msg, len);
+  gpsSerial.flush();
+}
+
+void gpsPowerOn() {
+  if (PIN_GPS_EN >= 0) {
+    pinMode(PIN_GPS_EN, OUTPUT);
+    digitalWrite(PIN_GPS_EN, LOW);      // turn GPS ON (if using high-side switch)
+    delay(50);
+  }
+}
+
+void gpsPowerOff() {
+  if (PIN_GPS_EN >= 0) {
+    digitalWrite(PIN_GPS_EN, HIGH);     // turn GPS OFF
+  }
+}
+
+void gpsExitPSM() {
+  sendUBX(UBX_PSM_OFF, sizeof(UBX_PSM_OFF));
+}
+
+void gpsEnterPSM() {
+  sendUBX(UBX_PSM_ON, sizeof(UBX_PSM_ON));
+}
+
+bool waitForFirstFix(uint32_t timeoutMs) {
+  uint32_t start = millis();
+  while (millis() - start < timeoutMs) {
+    while (gpsSerial.available()) gps.encode(gpsSerial.read());
+    if (gps.location.isValid() && gps.satellites.value() >= 3) return true;
+
+    // let loop run other tasks
+    delay(20);
+  }
+  return false;
+}
+
+void IRAM_ATTR vibISR() {
+  vibEdgeFlag = true;
+}
+
+
+
 
 void setup() {
     Serial.begin(115200);
-    while (!Serial);
+    delay(500);
     Serial.println("\n Starting Integrated LoRa-GPS-DHT Sensor Node...");
+
+
+  pinMode(PIN_VIB, INPUT);
+  attachInterrupt(digitalPinToInterrupt(PIN_VIB), vibISR, RISING);
+  pinMode(GPS_HIGH, OUTPUT);
+
+
 
     // // dht setup
     // dht.begin();
@@ -279,35 +212,6 @@ void setup() {
     // gps setup
     gpsSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
     Serial.println("GPS Serial Port Initialized.");
-
-    // Initialize AHT Sensor
-    setupAHTSensor(); // Call the AHT sensor setup function
-    Serial.println("AHT Sensor Initialized.");
-
-    // MQ-7 setup
-    mq7.calibrate();
-    Serial.println(" MQ-7 Sensor Initialized and calibrated.");
-
-    // MQ-135 setup
-    MQ135.init(); 
-    Serial.print("Calibrating MQ-135, please wait.");
-    float calcR0 = 0;
-    for(int i = 1; i <= 10; i++) {
-        MQ135.update();
-        calcR0 += MQ135.calibrate(RatioMQ135CleanAir);
-        Serial.print(".");
-    }
-    MQ135.setR0(calcR0/10);
-    Serial.println(" done!.");
-    if(isinf(calcR0)) {
-        Serial.println("Warning: Connection issue, R0 is infinite (Open circuit detected) please check your wiring and supply"); 
-        while(1);
-    }
-    if(calcR0 == 0) {
-        Serial.println("Warning: Connection issue found, R0 is zero (Analog pin shorts to ground) please check your wiring and supply"); 
-        while(1);
-    }
-    Serial.println("MQ-135 Sensor Initialized.");
 
     // LoRa setup
     LoRa.setPins(ss, rst, dio0);
@@ -320,39 +224,113 @@ void setup() {
     Serial.println("LoRa Initialized OK!");
     Serial.println("Ready for monitoring and transmitting data...");
 
-    // magnetic sensor setup
-    pinMode(Sensor, INPUT);
-    Serial.println("Magnetic Sensor Initialized.");
+    gpsEnterPSM();
+    Serial.println("GPS set to PSM (IDLE).");
 }
 
 
 void loop() {
-    unsigned long currentMillis = millis(); // Get the current time for non-blocking operations
+    const uint32_t now = millis();
 
-    // //dht reading
-    // if (currentMillis - lastDhtReadMillis >= DHT_READ_INTERVAL) {
-    //     lastDhtReadMillis = currentMillis; // Update the last read time
-    //     readDHTSensor(); // Call the function to read DHT data
-    // }
+    // Feed GPS parser continuously (cheap)
+    while (gpsSerial.available()) gps.encode(gpsSerial.read());
+
+    // --- Vibration reading + send gating ---
+    static const int VIB_THRESHOLD = 4000;            // analog threshold
+    int  vibValue = analogRead(PIN_VIB);              // read SW-18010P analog
+    bool detected = (vibValue < VIB_THRESHOLD);       // true = vibration detected
+
+    // --- NEW: 5-minute LOW hold for GPS_HIGH after any vibration ---
+    static bool     gpsLowHold      = false;          // are we currently holding LOW?
+    static uint32_t gpsLowStartMs   = 0;              // when the hold started
+    const  uint32_t GPS_LOW_HOLD_MS = 5UL * 1000UL;  // 5 seconds
 
 
-    // AHT Sensor Reading
-    if (currentMillis - lastAhtReadMillis >= AHT_READ_INTERVAL) {
-        lastAhtReadMillis = currentMillis; // Update the last read time
-        readAHTSensor();                   // Call the function to read AHT data
+    // Start/restart the 5-minute LOW hold whenever vibration is detected
+    if (detected) {
+        if (!gpsLowHold) {
+            Serial.println("[GPS_HIGH] Vibration detected → start 5-min LOW hold");
+        } else {
+            Serial.println("[GPS_HIGH] Vibration detected → restart 5-min LOW hold");
+        }
+        gpsLowHold    = true;
+        gpsLowStartMs = now;
     }
-    //gps reading
+
+    // Apply the hold or release when time elapsed
+    if (gpsLowHold) {
+        digitalWrite(GPS_HIGH, LOW);
+        if (now - gpsLowStartMs >= GPS_LOW_HOLD_MS) {
+            gpsLowHold = false;
+            digitalWrite(GPS_HIGH, HIGH);
+            Serial.println("[GPS_HIGH] 5-minute window elapsed → set HIGH");
+        }
+    } else {
+        // No active hold → keep HIGH
+        digitalWrite(GPS_HIGH, HIGH);
+    }
+
+    // --- Original send gating logic (unchanged) ---
+    if (detected) {
+        lastVibrationMs = now;                        // keep inactivity timer meaningful
+        if (now - lastSendMs >= LORA_SEND_INTERVAL) {
+            Serial.println("[VIB] Vibration detected -> Sending LoRa packet");
+            sendLoRaPacket();
+            lastSendMs = now;                         // start cooldown
+        } else {
+            Serial.println("[VIB] Ignored (still within cooldown)");
+        }
+    }
+
+    // --- Periodic status print ---
+    {
+      static uint32_t lastVibPrintMs = 0;             // print once per second
+      if (now - lastVibPrintMs >= 1000) {
+        lastVibPrintMs = now;
+
+        bool canSend  = (now - lastSendMs >= LORA_SEND_INTERVAL);
+        uint32_t cooldownMs  = canSend ? 0 : (LORA_SEND_INTERVAL - (now - lastSendMs));
+        uint32_t cooldownSec = (cooldownMs + 999) / 1000;
+
+        uint32_t holdRemainMs  = 0;
+        if (gpsLowHold) {
+          uint32_t elapsed = now - gpsLowStartMs;
+          holdRemainMs = (elapsed >= GPS_LOW_HOLD_MS) ? 0 : (GPS_LOW_HOLD_MS - elapsed);
+        }
+        uint32_t holdRemainSec = (holdRemainMs + 999) / 1000;
+
+        Serial.print("[VIB-STATUS] value=");
+        Serial.print(vibValue);
+        Serial.print(" thresh=");
+        Serial.print(VIB_THRESHOLD);
+        Serial.print(" | detected=");
+        Serial.print(detected ? "YES" : "NO");
+        Serial.print(" | GPS_HIGH=");
+        Serial.print(gpsLowHold ? "LOW (holding)" : "HIGH");
+        Serial.print(" | hold_left(s)=");
+        Serial.print(gpsLowHold ? holdRemainSec : 0);
+        Serial.print(" | can_send_now=");
+        Serial.print(canSend ? "YES" : "NO");
+        Serial.print(" | next_send_in=");
+        Serial.print(canSend ? 0 : cooldownSec);
+        Serial.println("s");
+      }
+    }
+
+    // ACTIVE state behavior (kept minimal, only timer logic used)
+    if (state == ACTIVE) {
+        // If no vibration for 30 minutes -> back to PSM (IDLE)
+        if (now - lastVibrationMs >= INACTIVITY_PSM_MS) {
+            Serial.println("[IDLE] No vibration for 30 min. Entering GPS PSM.");
+            gpsEnterPSM();
+            gpsPowerOff();        // turn off if you use a high-side switch
+            state = IDLE;
+        }
+    }
+
+    // Light idle
+    delay(10);
+
+    // gps reading (your existing pretty print)
     readGPSData();
-
-    // // Read MQ-7 and MQ-135 data
-    readMQ7Sensor();
-    readMQ135Sensor();
-
-    // ssend lora packet
-    if (currentMillis - lastLoRaSendMillis >= LORA_SEND_INTERVAL) {
-        lastLoRaSendMillis = currentMillis; 
-        sendLoRaPacket(); 
-    }
-    // magnetic sensor reading
-    readMagneticSensor(); 
 }

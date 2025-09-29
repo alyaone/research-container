@@ -1,0 +1,227 @@
+// ===== LoRa Receiver (Enhanced, Non-Blocking WiFi/MQTT) =====
+#include <SPI.h>
+#include <LoRa.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
+
+// ------------ LoRa Config ------------
+#define LORA_SS    5
+#define LORA_RST   13
+#define LORA_DIO0  25
+#define LORA_FREQ  865.0625E6   // adjust to your region
+#define LORA_SYNC  0xF3
+
+// ------------ WiFi / MQTT Config ------------
+const char* ssid       = "alyaone";
+const char* password   = "apayalupa";
+const char* mqtt_server = "172.20.10.5";
+const int   mqtt_port   = 1883;
+// Optional: set static IP to skip DHCP (uncomment & adjust if you want)
+/*
+IPAddress ip(172,20,10,123), gw(172,20,10,1), mask(255,255,255,0);
+IPAddress dns(172,20,10,1); // or your DNS
+*/
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// ------------ Debug Macro ------------
+#define DEBUG 1
+#if DEBUG
+  #define DBG(...)  Serial.println(__VA_ARGS__)
+#else
+  #define DBG(...)
+#endif
+
+// ------------ Packet Struct ------------
+#pragma pack(push,1)
+struct LoRaData {
+  uint8_t  packetCounter;
+  double   latitude;
+  double   longitude;
+  float    altitude;
+  float    speed;
+  uint8_t  satellites;
+  char     timeUTC[20];  // "YYYY/MM/DD,HH:MM:SS" + '\0'
+};
+#pragma pack(pop)
+
+LoRaData receivedData;
+
+// ------------ Utility ------------
+static void hexDump(const uint8_t* buf, int len) {
+  for (int i = 0; i < len; ++i) {
+    if (i % 16 == 0) Serial.println();
+    if (buf[i] < 16) Serial.print('0');
+    Serial.print(buf[i], HEX);
+    Serial.print(' ');
+  }
+  Serial.println();
+}
+
+// ------------ WiFi Helpers ------------
+void startWiFi(uint32_t timeout_ms = 10000) {
+  WiFi.mode(WIFI_STA);
+  WiFi.persistent(false);
+  WiFi.setSleep(false);           // lower latency during handshakes
+  WiFi.setAutoReconnect(true);
+  WiFi.setHostname("lora-receiver");
+
+  // If you know channel & BSSID you can accelerate association:
+  // uint8_t bssid[6] = {0xAA,0xBB,0xCC,0xDD,0xEE,0xFF};
+  // WiFi.begin(ssid, password, /*channel*/ 6, bssid);
+
+  // If using static IP:
+  // WiFi.config(ip, gw, dns, mask);
+
+  WiFi.begin(ssid, password);
+
+  uint32_t t0 = millis();
+  Serial.print("Connecting WiFi");
+  while (WiFi.status() != WL_CONNECTED && (millis() - t0) < timeout_ms) {
+    delay(250);
+    Serial.print('.');
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("\nWiFi OK, IP: %s\n", WiFi.localIP().toString().c_str());
+  } else {
+    Serial.println("\nWiFi timeout → proceed offline, will retry in loop()");
+  }
+}
+
+bool reconnectMQTT(uint32_t timeout_ms = 4000) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  uint32_t t0 = millis();
+  while (!client.connected() && (millis() - t0) < timeout_ms) {
+    Serial.print("Connecting MQTT...");
+    if (client.connect("lora-recv")) {
+      Serial.println("connected");
+      return true;
+    } else {
+      Serial.printf("failed rc=%d\n", client.state());
+      delay(400);
+    }
+  }
+  return client.connected();
+}
+
+// ------------ Setup ------------
+void setup() {
+  Serial.begin(115200);
+  delay(200);
+  Serial.println("\n📡 LoRa Receiver Node Starting...");
+
+  // LoRa init
+  LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
+  int tries = 0;
+  while (!LoRa.begin(LORA_FREQ)) {
+    Serial.println("LoRa init failed. Retrying...");
+    delay(350);
+    if (++tries > 20) {
+      Serial.println("LoRa init giving up. Check wiring/freq.");
+      break;
+    }
+  }
+  LoRa.setSyncWord(LORA_SYNC);
+  Serial.println("LoRa Initialized OK! Ready to receive packets.");
+
+  // WiFi / MQTT
+  startWiFi(10000);
+  client.setServer(mqtt_server, mqtt_port);
+  client.setBufferSize(1024); // allow larger JSON if needed
+}
+
+// ------------ Main Loop ------------
+void loop() {
+  // Non-blocking WiFi retry every 5s if disconnected
+  static uint32_t lastWiFiRetry = 0;
+  if (WiFi.status() != WL_CONNECTED && millis() - lastWiFiRetry > 5000) {
+    lastWiFiRetry = millis();
+    Serial.println("WiFi retry...");
+    WiFi.disconnect();
+    WiFi.begin(ssid, password);
+  }
+
+  // Non-blocking MQTT reconnect attempts
+  if (!client.connected()) {
+    reconnectMQTT(1200); // quick attempt; we loop often anyway
+  }
+  client.loop(); // keep MQTT alive
+
+  // ---- LoRa receive ----
+  int packetSize = LoRa.parsePacket();
+  if (packetSize <= 0) {
+    delay(2);
+    yield();
+    return;
+  }
+
+  int rssi = LoRa.packetRssi();
+  float snr = LoRa.packetSnr();
+
+  Serial.println("\n✅ LoRa packet detected.");
+  Serial.print("Packet bytes: "); Serial.println(packetSize);
+  Serial.print("RSSI: "); Serial.print(rssi);
+  Serial.print(" dBm | SNR: "); Serial.print(snr, 1); Serial.println(" dB");
+
+  if (packetSize == (int)sizeof(LoRaData)) {
+    memset(&receivedData, 0, sizeof(receivedData));
+    int n = LoRa.readBytes((uint8_t*)&receivedData, sizeof(receivedData));
+    while (LoRa.available()) LoRa.read(); // drain any leftover
+
+    if (n == sizeof(LoRaData)) {
+      receivedData.timeUTC[sizeof(receivedData.timeUTC) - 1] = '\0';
+
+      Serial.print("\n------ Receive Data Packet #");
+      Serial.print(receivedData.packetCounter);
+      Serial.println(" ------");
+      Serial.print("Lat: ");  Serial.println(receivedData.latitude, 6);
+      Serial.print("Lon: ");  Serial.println(receivedData.longitude, 6);
+      Serial.print("Alt: ");  Serial.print(receivedData.altitude, 2); Serial.println(" m");
+      Serial.print("Spd: ");  Serial.print(receivedData.speed, 2);    Serial.println(" km/h");
+      Serial.print("Sats: "); Serial.println(receivedData.satellites);
+      Serial.print("Time: "); Serial.println(receivedData.timeUTC);
+      Serial.println("---------------------------------------------");
+
+      // Build compact JSON
+      String payload = "{";
+      payload += "\"packetCounter\":" + String(receivedData.packetCounter) + ",";
+      payload += "\"latitude\":"      + String(receivedData.latitude, 6) + ",";
+      payload += "\"longitude\":"     + String(receivedData.longitude, 6) + ",";
+      payload += "\"altitude\":"      + String(receivedData.altitude, 2) + ",";
+      payload += "\"speed\":"         + String(receivedData.speed, 2) + ",";
+      payload += "\"satellites\":"    + String(receivedData.satellites) + ",";
+      payload += "\"timeUTC\":\""     + String(receivedData.timeUTC) + "\",";
+      payload += "\"rssi\":"          + String(rssi) + ",";
+      payload += "\"snr\":"           + String(snr,1);
+      payload += "}";
+
+      Serial.println("JSON:");
+      Serial.println(payload);
+
+      // Publish if MQTT is up; otherwise just log
+      if (client.connected()) {
+        if (client.publish("supplychain/containers", payload.c_str())) {
+          Serial.println("📤 MQTT published");
+        } else {
+          Serial.println("❌ MQTT publish failed");
+        }
+      } else {
+        Serial.println("⚠ MQTT not connected; skipped publish");
+      }
+    } else {
+      Serial.println("Error: struct read incomplete. Dumping raw:");
+      hexDump((const uint8_t*)&receivedData, n);
+    }
+  } else {
+    // Unexpected length — read and hexdump for debugging
+    Serial.println("Unexpected packet size; dumping hex:");
+    static uint8_t buf[256];
+    int toRead = min(packetSize, (int)sizeof(buf));
+    int n = LoRa.readBytes(buf, toRead);
+    while (LoRa.available()) LoRa.read(); // drain
+    hexDump(buf, n);
+  }
+
+  yield();
+}

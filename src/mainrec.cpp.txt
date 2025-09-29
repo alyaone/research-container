@@ -1,159 +1,166 @@
-//Receiver Code
-
+// ===== LoRa Receiver (Enhanced) =====
 #include <SPI.h>
 #include <LoRa.h>
+// #include <WiFi.h>
+// #include <PubSubClient.h>
 
-// Define the pins used by the transceiver module
-// These pins should match the sender's configuration.
-#define ss 5
-#define rst 13
-#define dio0 25
+// ------------ Config ------------
+#define LORA_SS    5
+#define LORA_RST   13
+#define LORA_DIO0  25
+#define LORA_FREQ  865.0625E6
+#define LORA_SYNC  0xF3
 
-// --- IMPORTANT: This struct MUST be identical to the sender's LoRaData struct ---
-// Define a structure to hold your data
+#define DEBUG 1
+#if DEBUG
+  #define DBG(...)  Serial.println(__VA_ARGS__)
+#else
+  #define DBG(...)
+#endif
+
+// If your sender uses packed structs, match packing:
+#pragma pack(push,1)
 struct LoRaData {
-  uint8_t packetCounter;
-  float humidity;
-  float temperatureC;
-  double latitude;
-  double longitude;
-  float altitude;
-  float speed;
-  uint8_t satellites;
-  char timeUTC[9]; // HHMMSS.ms (e.g., "123456.78") + null terminator
-  uint8_t magneticStatus; // 0 for CLOSED, 1 for OPEN (based on sender's conversion)
-  float coPPM;
-  float aqiCO2;
-  float alcoholPPM;
-  float toluenPPM;
-  float nh4PPM;
-  float acetonPPM;
+  uint8_t  packetCounter;
+  double   latitude;
+  double   longitude;
+  float    altitude;
+  float    speed;
+  uint8_t  satellites;
+  char     timeUTC[20];  // enough for "YYYY/MM/DD,HH:MM:SS" + '\0'
 };
+#pragma pack(pop)
 
-// Create an instance of the struct to store the received data
+
 LoRaData receivedData;
 
+// // MQTT bits if you re-enable later
+// const char* ssid = "alyaone";
+// const char* password = "apayalupa";
+// const char* mqtt_server = "172.20.10.5";
+// const int   mqtt_port   = 1883;
+// WiFiClient espClient;
+// PubSubClient client(espClient);
+
+// ------------ Helpers ------------
+static void hexDump(const uint8_t* buf, int len) {
+  for (int i = 0; i < len; ++i) {
+    if (i % 16 == 0) Serial.println();
+    if (buf[i] < 16) Serial.print('0');
+    Serial.print(buf[i], HEX);
+    Serial.print(' ');
+  }
+  Serial.println();
+}
+
 void setup() {
-  // initialize Serial Monitor
   Serial.begin(115200);
-  while (!Serial); // Wait for serial port to connect. Needed for native USB port only.
+  delay(300);
   Serial.println("\n📡 LoRa Receiver Node Starting...");
 
-  // setup LoRa transceiver module
-  LoRa.setPins(ss, rst, dio0);
+  LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
 
-  // set the frequency to match the sender
-  // This must be identical to the frequency in your main.cpp
-  while (!LoRa.begin(865.0625E6)) {
-    Serial.println("LoRa initialization failed. Retrying...");
-    delay(10);
+  int tries = 0;
+  while (!LoRa.begin(LORA_FREQ)) {
+    Serial.println("LoRa init failed. Retrying...");
+    delay(400);
+    if (++tries > 20) {
+      Serial.println("LoRa init giving up. Check wiring/freq.");
+      break;
+    }
   }
-
-  // Set the sync word to match the sender
-  LoRa.setSyncWord(0xF3);
+  LoRa.setSyncWord(LORA_SYNC);
+  // Optional radio tuning (must match sender if you change them)
+  // LoRa.setSpreadingFactor(7);   // 6–12
+  // LoRa.setSignalBandwidth(125E3); // 7.8–500 kHz
+  // LoRa.setCodingRate4(5);       // 5–8
 
   Serial.println("LoRa Initialized OK!");
   Serial.println("Ready to receive packets.");
+
+  // // WiFi / MQTT (optional)
+  // WiFi.begin(ssid, password);
+  // while (WiFi.status() != WL_CONNECTED) { delay(300); Serial.print('.'); }
+  // Serial.println("\nWiFi connected");
+  // client.setServer(mqtt_server, mqtt_port);
 }
 
 void loop() {
-  // Check for an incoming LoRa packet. The parsePacket() function
-  // returns the size of the packet if one is received, or 0 if not.
+  // if (!client.connected()) { /* reconnect MQTT */ }
+  // client.loop();
+
   int packetSize = LoRa.parsePacket();
+  if (!packetSize) {
+    delay(2);
+    return;
+  }
 
-  if (packetSize) {
-    Serial.println("\n✅ LoRa packet received!");
+  // Show basic RF stats
+  int rssi = LoRa.packetRssi();
+  float snr = LoRa.packetSnr();
+  Serial.println("\n✅ LoRa packet detected.");
+  Serial.print("Packet bytes: "); Serial.println(packetSize);
+  Serial.print("RSSI: "); Serial.print(rssi);
+  Serial.print(" dBm | SNR: "); Serial.print(snr, 1); Serial.println(" dB");
 
-    // Read the entire packet directly into the 'receivedData' struct
-    int bytesRead = LoRa.readBytes((byte*)&receivedData, sizeof(receivedData));
+  // If size matches our struct, read directly; else show hex dump
+  if (packetSize == (int)sizeof(LoRaData)) {
+    memset(&receivedData, 0, sizeof(receivedData)); // avoid stale bytes
+    int n = LoRa.readBytes((uint8_t*)&receivedData, sizeof(receivedData));
+    // Drain any leftover (should be none if sizes match)
+    while (LoRa.available()) LoRa.read();
 
-    // Verify if the received packet size matches the expected struct size
-    if (bytesRead == sizeof(receivedData)) {
-      // Print the received data and packet information
+    if (n == sizeof(LoRaData)) {
+      // Ensure C-string termination (defensive)
+      receivedData.timeUTC[sizeof(receivedData.timeUTC) - 1] = '\0';
+
       Serial.print("\n------ Receive Data Packet #");
       Serial.print(receivedData.packetCounter);
-      Serial.println("------");
-      Serial.print("Packet size: ");
-      Serial.print(packetSize);
-      Serial.println(" bytes");
-      Serial.print("RSSI: ");
-      Serial.print(LoRa.packetRssi());
-      Serial.println(" dBm");
-      Serial.print("SNR: ");
-      Serial.print(LoRa.packetSnr());
-      Serial.println(" dB");
-      Serial.println();
+      Serial.println(" ------");
+      Serial.print("Lat: ");  Serial.println(receivedData.latitude, 6);
+      Serial.print("Lon: ");  Serial.println(receivedData.longitude, 6);
+      Serial.print("Alt: ");  Serial.print(receivedData.altitude, 2); Serial.println(" m");
+      Serial.print("Spd: ");  Serial.print(receivedData.speed, 2);    Serial.println(" km/h");
+      Serial.print("Sats: "); Serial.println(receivedData.satellites);
+      Serial.print("Time: "); Serial.println(receivedData.timeUTC);
+      Serial.println("---------------------------------------------");
 
-      Serial.print("Hum: "); 
-      Serial.print(receivedData.humidity, 2); 
-      Serial.print("% "); Serial.print('\t'); Serial.print("  | "); 
-      Serial.print("Temp: ");
-      Serial.print(receivedData.temperatureC, 2);
-      Serial.println("C");
-      Serial.println();
+      // // Build JSON (compact)
+      // String payload = "{";
+      // payload += "\"packetCounter\":" + String(receivedData.packetCounter) + ",";
+      // payload += "\"latitude\":"      + String(receivedData.latitude, 6) + ",";
+      // payload += "\"longitude\":"     + String(receivedData.longitude, 6) + ",";
+      // payload += "\"altitude\":"      + String(receivedData.altitude, 2) + ",";
+      // payload += "\"speed\":"         + String(receivedData.speed, 2) + ",";
+      // payload += "\"satellites\":"    + String(receivedData.satellites) + ",";
+      // payload += "\"timeUTC\":\""     + String(receivedData.timeUTC) + "\",";
+      // payload += "\"rssi\":"          + String(rssi) + ",";
+      // payload += "\"snr\":"           + String(snr,1);
+      // payload += "}";
 
-      Serial.print("Lat: ");
-      Serial.print(receivedData.latitude, 6); Serial.print('\t'); Serial.print("  |  ");
+      // Serial.println("JSON:");
+      // Serial.println(payload);
 
-      Serial.print("Long: ");
-      Serial.println(receivedData.longitude, 6); 
-
-      Serial.print("Alt: ");
-      Serial.print(receivedData.altitude, 2);
-      Serial.print("m"); Serial.print('\t'); Serial.print("  |  ");
-
-      Serial.print("Speed: ");
-      Serial.print(receivedData.speed, 2);
-      Serial.println("km/h");
-
-      Serial.print("Satellites: ");
-      Serial.print(receivedData.satellites); Serial.print('\t'); Serial.print("  |  ");
-
-      Serial.print("Time UTC: ");
-      Serial.println(receivedData.timeUTC);
-      Serial.println();
-
-      Serial.print("Magnetic: ");
-      // Convert the received uint8_t back to a descriptive string
-      if (receivedData.magneticStatus == 1) {
-        Serial.println("CLOSED");
-      } else if (receivedData.magneticStatus == 0) {
-        Serial.println("OPEN");
-      } else {
-        Serial.print("UNKNOWN (");
-        Serial.print(receivedData.magneticStatus);
-        Serial.println(")");
-      } 
-
-      Serial.println();
-
-      Serial.print("CO PPM: ");
-      Serial.print(receivedData.coPPM); Serial.print('\t'); Serial.print("  |  ");
-
-      Serial.print("CO2 (PPM): ");
-      Serial.println(receivedData.aqiCO2);
-
-      Serial.print("Alc (PPM): ");
-      Serial.print(receivedData.alcoholPPM); Serial.print('\t'); Serial.print("  |  ");
-
-      Serial.print("Toluen (PPM): ");
-      Serial.println(receivedData.toluenPPM);
-
-      Serial.print("NH4 (PPM): ");
-      Serial.print(receivedData.nh4PPM); Serial.print('\t'); Serial.print("  |  ");
-
-      Serial.print("Aceton (PPM): ");
-      Serial.println(receivedData.acetonPPM);
-
-      Serial.println("---------------------------------------------\n");
+      // // Publish to MQTT (uncomment when ready)
+      // if (client.publish("supplychain/containers", payload.c_str())) {
+      //   Serial.println("📤 MQTT published");
+      // } else {
+      //   Serial.println("❌ MQTT publish failed");
+      // }
 
     } else {
-      Serial.println("Error: Received packet size mismatch or incomplete data.");
-      // Optional: Read remaining bytes if packet was larger than expected
-      while (LoRa.available()) {
-        LoRa.read();
-      }
+      Serial.println("Error: struct read incomplete. Dumping raw:");
+      // read any remaining bytes (already drained above) then print what we got
+      hexDump((const uint8_t*)&receivedData, n);
     }
+
+  } else {
+    // Unexpected length — read and hexdump for debugging
+    Serial.println("Unexpected packet size; dumping hex:");
+    static uint8_t buf[256];
+    int toRead = min(packetSize, (int)sizeof(buf));
+    int n = LoRa.readBytes(buf, toRead);
+    while (LoRa.available()) LoRa.read(); // drain
+    hexDump(buf, n);
   }
-  delay(10);
 }
