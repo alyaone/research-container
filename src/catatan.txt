@@ -1,0 +1,1 @@
+draft2 --> integrating main.cpp with turning on lora settings, magnetic, and vibration sensor
