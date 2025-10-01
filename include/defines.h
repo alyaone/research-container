@@ -54,14 +54,13 @@ int packetCounter = 0; // Counter for LoRa packets sent
 // Magnetic sensor variables
 bool magneticValue;
 const char* magneticStatus;
-int lastMagneticValue = -1; // initialize invalid value
 
 // Timers for non-blocking operations using millis()
 unsigned long lastDhtReadMillis = 0;
 const long DHT_READ_INTERVAL = 2000; // Read DHT every 2 seconds (2000 ms)
 
 unsigned long lastLoRaSendMillis = 0;
-const long LORA_SEND_INTERVAL = 5000UL; // Send LoRa packet every 10 seconds (10000 ms)
+const long LORA_SEND_INTERVAL = 30000; // Send LoRa packet every 10 seconds (10000 ms)
 
 
 // Variables to store current sensor readings

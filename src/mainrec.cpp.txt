@@ -3,14 +3,12 @@
 #include <LoRa.h>
 // #include <WiFi.h>
 // #include <PubSubClient.h>
-#ifndef LORA_NSS_PIN
-  #define LORA_NSS_PIN LORA_SS   // or replace with `ss` if that’s your symbol
-#endif
+
 // ------------ Config ------------
 #define LORA_SS    5
 #define LORA_RST   13
 #define LORA_DIO0  25
-#define LORA_FREQ  923E6
+#define LORA_FREQ  865.0625E6
 #define LORA_SYNC  0xF3
 
 #define DEBUG 1
@@ -54,36 +52,6 @@ static void hexDump(const uint8_t* buf, int len) {
   }
   Serial.println();
 }
-static uint8_t sx127xReadReg(uint8_t addr) {
-  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
-  digitalWrite(LORA_NSS_PIN, LOW);
-  SPI.transfer(addr & 0x7F);
-  uint8_t v = SPI.transfer(0x00);
-  digitalWrite(LORA_NSS_PIN, HIGH);
-  SPI.endTransaction();
-  return v;
-}
-
-static void sx127xWriteReg(uint8_t addr, uint8_t val) {
-  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
-  digitalWrite(LORA_NSS_PIN, LOW);
-  SPI.transfer(addr | 0x80);
-  SPI.transfer(val);
-  digitalWrite(LORA_NSS_PIN, HIGH);
-  SPI.endTransaction();
-}
-
-static void loraSetLDRO(bool on) {               // RegModemConfig3 bit3
-  uint8_t r = sx127xReadReg(0x26);
-  r = on ? (r |  0b00001000) : (r & ~0b00001000);
-  sx127xWriteReg(0x26, r);
-}
-
-static void loraSetLnaBoostHF(bool on) {         // RegLna bits7:6 = 11
-  uint8_t r = sx127xReadReg(0x0C) & 0x3F;
-  if (on) r |= 0xC0;
-  sx127xWriteReg(0x0C, r);
-}
 
 void setup() {
   Serial.begin(115200);
@@ -98,37 +66,24 @@ void setup() {
     delay(400);
     if (++tries > 20) {
       Serial.println("LoRa init giving up. Check wiring/freq.");
-      return; // bail out if radio never comes up
+      break;
     }
   }
-
-  // ---- Match the transmitter’s settings ----
-  // validate packets with CRC
-
-  LoRa.setSpreadingFactor(12);     // SF7..12 (higher = longer range, lower data rate)
-  LoRa.setSignalBandwidth(125E3); // 7.8k..500k (narrower = better sensitivity, lower data rate)
-  LoRa.setCodingRate4(8);         // 4/5..4/8 (higher = more robust, lower throughput)
-  LoRa.setPreambleLength(12);      // default is 8, can increase for noisy links
-  LoRa.setSyncWord(0x34);         // must match RX
-  LoRa.enableCrc();               // must match RX
-  LoRa.setGain(0);                // 0 = AGC ON (auto LNA gain control)
-  loraSetLDRO(true);              // LDRO ON (needed for SF11/SF12 at narrow BW)
-  loraSetLnaBoostHF(true);        // LNA Boost HF ON (extra sensitivity, more current)
-
-
-  // Optional RX-side tuning (leave as-is if unsure):
-  // LoRa.setGain(0);                   // 0 = AGC (default). 1..6 = manual LNA gain.
+  LoRa.setSyncWord(LORA_SYNC);
+  // Optional radio tuning (must match sender if you change them)
+  // LoRa.setSpreadingFactor(7);   // 6–12
+  // LoRa.setSignalBandwidth(125E3); // 7.8–500 kHz
+  // LoRa.setCodingRate4(5);       // 5–8
 
   Serial.println("LoRa Initialized OK!");
   Serial.println("Ready to receive packets.");
 
-  // If you use onReceive(callback), enable continuous RX:
-  // LoRa.onReceive(onLoRaPacket);
-  // LoRa.receive();
-
-  // Otherwise, if you poll with LoRa.parsePacket() in loop(), no extra call needed.
+  // // WiFi / MQTT (optional)
+  // WiFi.begin(ssid, password);
+  // while (WiFi.status() != WL_CONNECTED) { delay(300); Serial.print('.'); }
+  // Serial.println("\nWiFi connected");
+  // client.setServer(mqtt_server, mqtt_port);
 }
-
 
 void loop() {
   // if (!client.connected()) { /* reconnect MQTT */ }
