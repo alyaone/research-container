@@ -4,6 +4,7 @@
 #include <MQ7_read.h>
 #include <MQ135_read.h>
 
+void readMagneticSensor();
 // GPS-function
 void readGPSData() {
     while (gpsSerial.available() > 0) {
@@ -139,6 +140,7 @@ void sendLoRaPacket() {
     Serial.print("Time UTC: ");
     Serial.println(dataToSend.timeUTC);
     Serial.println();
+    
 
   // Send the struct as raw bytes
   LoRa.beginPacket();
@@ -190,7 +192,23 @@ void IRAM_ATTR vibISR() {
   vibEdgeFlag = true;
 }
 
+void readMagneticSensor() {
+    magneticValue = digitalRead(Sensor);
 
+    // Only print the status if it has changed
+    if (magneticValue != lastMagneticValue) {
+        if (magneticValue == 0) {
+            magneticStatus = "Magnet Detected!";
+        } else {
+            magneticStatus = "No Magnet Detected";
+        }
+
+        Serial.print("Magnetic Sensor Status: ");
+        Serial.println(magneticStatus);
+
+        lastMagneticValue = magneticValue;
+    }
+}
 
 
 void setup() {
@@ -198,12 +216,13 @@ void setup() {
     delay(500);
     Serial.println("\n Starting Integrated LoRa-GPS-DHT Sensor Node...");
 
+    pinMode(Sensor, INPUT);
+    Serial.println(" Magnetic Sensor Initialized.");
 
-  pinMode(PIN_VIB, INPUT);
-  attachInterrupt(digitalPinToInterrupt(PIN_VIB), vibISR, RISING);
-  pinMode(GPS_HIGH, OUTPUT);
-
-
+    pinMode(PIN_VIB, INPUT);
+    attachInterrupt(digitalPinToInterrupt(PIN_VIB), vibISR, RISING);
+    pinMode(GPS_HIGH, OUTPUT);
+  
 
     // // dht setup
     // dht.begin();
@@ -266,21 +285,21 @@ void loop() {
     bool detected = (vibValue < VIB_THRESHOLD);       // true = vibration detected
 
     // --- NEW: 5-minute LOW hold for GPS_HIGH after any vibration ---
-    static bool     gpsLowHold      = true;          // are we currently holding LOW?
+    static bool     gpsLowHold      = false;          // are we currently holding LOW?
     static uint32_t gpsLowStartMs   = 0;              // when the hold started
     const  uint32_t GPS_LOW_HOLD_MS = 5UL * 1000UL;  // 5 seconds
 
 
     // Start/restart the 5-minute LOW hold whenever vibration is detected
-    // if (detected) {
-    //     if (!gpsLowHold) {
-    //         Serial.println("[GPS_HIGH] Vibration detected → start 5-min LOW hold");
-    //     } else {
-    //         Serial.println("[GPS_HIGH] Vibration detected → restart 5-min LOW hold");
-    //     }
-    //     gpsLowHold    = true;
-    //     gpsLowStartMs = now;
-    // }
+    if (detected) {
+        if (!gpsLowHold) {
+            Serial.println("[GPS_HIGH] Vibration detected → start 5-min LOW hold");
+        } else {
+            Serial.println("[GPS_HIGH] Vibration detected → restart 5-min LOW hold");
+        }
+        gpsLowHold    = true;
+        gpsLowStartMs = now;
+    }
 
     // Apply the hold or release when time elapsed
     if (gpsLowHold) {
@@ -299,12 +318,12 @@ void loop() {
     if (detected) {
         lastVibrationMs = now;                        // keep inactivity timer meaningful
         if (now - lastSendMs >= LORA_SEND_INTERVAL) {
-            // Serial.println("[VIB] Vibration detected -> Sending LoRa packet");
+            Serial.println("[VIB] Vibration detected -> Sending LoRa packet");
             sendLoRaPacket();
             lastSendMs = now;                         // start cooldown
-        } //else {
-        //     Serial.println("[VIB] Ignored (still within cooldown)");
-        // }
+        } else {
+            Serial.println("[VIB] Ignored (still within cooldown)");
+        }
     }
 
     // --- Periodic status print ---
@@ -324,21 +343,21 @@ void loop() {
         }
         uint32_t holdRemainSec = (holdRemainMs + 999) / 1000;
 
-        // Serial.print("[VIB-STATUS] value=");
-        // Serial.print(vibValue);
-        // Serial.print(" thresh=");
-        // Serial.print(VIB_THRESHOLD);
-        // Serial.print(" | detected=");
-        // Serial.print(detected ? "YES" : "NO");
-        // Serial.print(" | GPS_HIGH=");
-        // Serial.print(gpsLowHold ? "LOW (holding)" : "HIGH");
-        // Serial.print(" | hold_left(s)=");
-        // Serial.print(gpsLowHold ? holdRemainSec : 0);
-        // Serial.print(" | can_send_now=");
-        // Serial.print(canSend ? "YES" : "NO");
-        // Serial.print(" | next_send_in=");
-        // Serial.print(canSend ? 0 : cooldownSec);
-        // Serial.println("s");
+        Serial.print("[VIB-STATUS] value=");
+        Serial.print(vibValue);
+        Serial.print(" thresh=");
+        Serial.print(VIB_THRESHOLD);
+        Serial.print(" | detected=");
+        Serial.print(detected ? "YES" : "NO");
+        Serial.print(" | GPS_HIGH=");
+        Serial.print(gpsLowHold ? "LOW (holding)" : "HIGH");
+        Serial.print(" | hold_left(s)=");
+        Serial.print(gpsLowHold ? holdRemainSec : 0);
+        Serial.print(" | can_send_now=");
+        Serial.print(canSend ? "YES" : "NO");
+        Serial.print(" | next_send_in=");
+        Serial.print(canSend ? 0 : cooldownSec);
+        Serial.println("s");
       }
     }
 
