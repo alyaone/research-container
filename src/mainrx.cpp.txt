@@ -30,6 +30,7 @@ struct LoRaData {
   float    speed;
   uint8_t  satellites;
   char     timeUTC[20];  // enough for "YYYY/MM/DD,HH:MM:SS" + '\0'
+  bool     doorValue
 };
 #pragma pack(pop)
 
@@ -168,6 +169,12 @@ void loop() {
       Serial.print("Spd: ");  Serial.print(receivedData.speed, 2);    Serial.println(" km/h");
       Serial.print("Sats: "); Serial.println(receivedData.satellites);
       Serial.print("Time: "); Serial.println(receivedData.timeUTC);
+      Serial.print("Door: "); 
+      if (dataToSend.doorValue) {
+      Serial.println("Switch Closed");
+    } else {
+      Serial.println("Switch Open");
+    }
       Serial.println("---------------------------------------------");
 
       // // Build JSON (compact)

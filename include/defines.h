@@ -52,7 +52,9 @@ DHT dht(DHTPIN, DHTTYPE); // DHT sensor object, initialized with pin and type
 int packetCounter = 0; // Counter for LoRa packets sent
 
 // Magnetic sensor variables
+#define magnetic 15
 bool magneticValue;
+int doorState = 0; // 
 const char* magneticStatus;
 int lastMagneticValue = -1; // initialize invalid value
 
@@ -67,7 +69,7 @@ const long LORA_SEND_INTERVAL = 5000UL; // Send LoRa packet every 10 seconds (10
 // Variables to store current sensor readings
 double currentLatitude = 0.0;
 double currentLongitude = 0.0;
-float currentAltitude = 0.0; // In meters
+float currentAltitude = 0.0; // In meters---
 float currentSpeed = 0.0;    // In km/h
 int currentSatellites = 0;
 String currentTimeUTC = "N/A"; // Store GPS time as a string
@@ -96,6 +98,8 @@ struct LoRaData {
   float    speed;
   uint8_t  satellites;
   char     timeUTC[20];  // enough for "YYYY/MM/DD,HH:MM:SS" + '\0'
+  bool     doorValue;
+
 };
 #pragma pack(pop)
 

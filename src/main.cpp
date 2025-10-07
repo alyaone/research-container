@@ -60,15 +60,15 @@ void readGPSData() {
                         localHour, utcMinute, utcSecond);
                 currentTimeUTC = String(timeStr);
 
-                // Print updated GPS data to the Serial Monitor.
-                Serial.println("GPS Data Updated:");
-                Serial.print("   LAT: "); Serial.print(currentLatitude, 6); Serial.println("\t");
-                Serial.print("   LONG: "); Serial.println(currentLongitude, 6);
-                Serial.print("   ALT (m): "); Serial.print(currentAltitude, 2); Serial.println("\t");
-                Serial.print("   SPEED (km/h): "); Serial.println(currentSpeed, 2);
-                Serial.print("   Satellites: "); Serial.print(currentSatellites); Serial.println("\t");
-                Serial.print("   Time UTC+7: "); Serial.println(currentTimeUTC);
-                Serial.println();
+                // // Print updated GPS data to the Serial Monitor.
+                // Serial.println("GPS Data Updated:");
+                // Serial.print("   LAT: "); Serial.print(currentLatitude, 6); Serial.println("\t");
+                // Serial.print("   LONG: "); Serial.println(currentLongitude, 6);
+                // Serial.print("   ALT (m): "); Serial.print(currentAltitude, 2); Serial.println("\t");
+                // Serial.print("   SPEED (km/h): "); Serial.println(currentSpeed, 2);
+                // Serial.print("   Satellites: "); Serial.print(currentSatellites); Serial.println("\t");
+                // Serial.print("   Time UTC+7: "); Serial.println(currentTimeUTC);
+                // Serial.println();
             }
         }
     }
@@ -113,6 +113,7 @@ void sendLoRaPacket() {
   // Convert String (currentTimeUTC) to C-style string (char[]) for strncpy
   strncpy(dataToSend.timeUTC, currentTimeUTC.c_str(), sizeof(dataToSend.timeUTC) - 1);
   dataToSend.timeUTC[sizeof(dataToSend.timeUTC) - 1] = '\0'; // Ensure null termination
+  dataToSend.doorValue = (doorState != 0);
 
 
     Serial.print("\n----- Transmitting Data Packet # ");
@@ -138,6 +139,13 @@ void sendLoRaPacket() {
     Serial.print(dataToSend.satellites); Serial.print('\t'); Serial.print("  |  ");
     Serial.print("Time UTC: ");
     Serial.println(dataToSend.timeUTC);
+    Serial.println();
+    Serial.print("Magnetic: ");
+    if (dataToSend.doorValue) {
+      Serial.println("Switch Closed");
+    } else {
+      Serial.println("Switch Open");
+    }
     Serial.println();
 
   // Send the struct as raw bytes
@@ -203,6 +211,8 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_VIB), vibISR, RISING);
   pinMode(GPS_HIGH, OUTPUT);
 
+  pinMode(magnetic, INPUT_PULLUP);
+
 
 
     // // dht setup
@@ -254,108 +264,222 @@ void setup() {
 }
 
 
+// void loop() {
+//     const uint32_t now = millis();
+
+//     // Feed GPS parser continuously (cheap)
+//     while (gpsSerial.available()) gps.encode(gpsSerial.read());
+
+//     // --- Vibration reading + send gating ---
+//     static const int VIB_THRESHOLD = 4000;            // analog threshold
+//     int  vibValue = analogRead(PIN_VIB);              // read SW-18010P analog
+//     bool detected = (vibValue < VIB_THRESHOLD);       // true = vibration detected
+
+//     // --- NEW: 5-minute LOW hold for GPS_HIGH after any vibration ---
+//     static bool     gpsLowHold      = false;          // are we currently holding LOW?
+//     static uint32_t gpsLowStartMs   = 0;              // when the hold started
+//     const  uint32_t GPS_LOW_HOLD_MS = 1800UL * 1000UL;  // 30 mins 
+
+
+//     // Start/restart the 5-minute LOW hold whenever vibration is detected
+//     if (detected) {
+//         if (!gpsLowHold) {
+//             Serial.println("[GPS_HIGH] Vibration detected → start 5-min LOW hold");
+//         } else {
+//             Serial.println("[GPS_HIGH] Vibration detected → restart 5-min LOW hold");
+//         }
+//         gpsLowHold    = true;
+//         gpsLowStartMs = now;
+//     }
+
+//     // Apply the hold or release when time elapsed
+//     if (gpsLowHold) {
+//         digitalWrite(GPS_HIGH, LOW);
+//         if (now - gpsLowStartMs >= GPS_LOW_HOLD_MS) {
+//             gpsLowHold = false;
+//             digitalWrite(GPS_HIGH, HIGH);
+//             Serial.println("[GPS_HIGH] 5-minute window elapsed → set HIGH");
+//         }
+//     } else {
+//         // No active hold → keep HIGH
+//         digitalWrite(GPS_HIGH, HIGH);
+//     }
+
+//     // --- Original send gating logic (unchanged) ---
+//     if (detected) {
+//         lastVibrationMs = now;                        // keep inactivity timer meaningful
+//         if (now - lastSendMs >= LORA_SEND_INTERVAL) {
+//             // Serial.println("[VIB] Vibration detected -> Sending LoRa packet");
+//             sendLoRaPacket();
+//             lastSendMs = now;                         // start cooldown
+//         } //else {
+//         //     Serial.println("[VIB] Ignored (still within cooldown)");
+//         // }
+//     }
+
+//     //magnetic sensor reading
+//   if (digitalRead(magnetic) == LOW) {
+//      Serial.println("Switch Closed");
+//      doorState = 1;
+//      while (digitalRead(magnetic) == LOW) {}
+//   }
+//   else {
+//     Serial.println("Switch Open");
+//     doorState = 0;
+//   }
+
+//     // --- Periodic status print ---
+//     {
+//       static uint32_t lastVibPrintMs = 0;             // print once per second
+//       if (now - lastVibPrintMs >= 1000) {
+//         lastVibPrintMs = now;
+
+//         bool canSend  = (now - lastSendMs >= LORA_SEND_INTERVAL);
+//         uint32_t cooldownMs  = canSend ? 0 : (LORA_SEND_INTERVAL - (now - lastSendMs));
+//         uint32_t cooldownSec = (cooldownMs + 999) / 1000;
+
+//         uint32_t holdRemainMs  = 0;
+//         if (gpsLowHold) {
+//           uint32_t elapsed = now - gpsLowStartMs;
+//           holdRemainMs = (elapsed >= GPS_LOW_HOLD_MS) ? 0 : (GPS_LOW_HOLD_MS - elapsed);
+//         }
+//         uint32_t holdRemainSec = (holdRemainMs + 999) / 1000;
+
+//         // Serial.print("[VIB-STATUS] value=");
+//         // Serial.print(vibValue);
+//         // Serial.print(" thresh=");
+//         // Serial.print(VIB_THRESHOLD);
+//         // Serial.print(" | detected=");
+//         // Serial.print(detected ? "YES" : "NO");
+//         // Serial.print(" | GPS_HIGH=");
+//         // Serial.print(gpsLowHold ? "LOW (holding)" : "HIGH");
+//         // Serial.print(" | hold_left(s)=");
+//         // Serial.print(gpsLowHold ? holdRemainSec : 0);
+//         // Serial.print(" | can_send_now=");
+//         // Serial.print(canSend ? "YES" : "NO");
+//         // Serial.print(" | next_send_in=");
+//         // Serial.print(canSend ? 0 : cooldownSec);
+//         // Serial.println("s");
+//       }
+//     }
+
+//     // ACTIVE state behavior (kept minimal, only timer logic used)
+//     if (state == ACTIVE) {
+//         // If no vibration for 30 minutes -> back to PSM (IDLE)
+//         if (now - lastVibrationMs >= INACTIVITY_PSM_MS) {
+//             Serial.println("[IDLE] No vibration for 30 min. Entering GPS PSM.");
+//             gpsEnterPSM();
+//             gpsPowerOff();        // turn off if you use a high-side switch
+//             state = IDLE;
+//         }
+//     }
+
+//     // Light idle
+//     delay(10);
+
+//     // gps reading (your existing pretty print)
+//     readGPSData();
+// }
+
 void loop() {
-    const uint32_t now = millis();
+  const uint32_t now = millis();
 
-    // Feed GPS parser continuously (cheap)
-    while (gpsSerial.available()) gps.encode(gpsSerial.read());
+  // Feed GPS parser continuously
+  while (gpsSerial.available()) gps.encode(gpsSerial.read());
 
-    // --- Vibration reading + send gating ---
-    static const int VIB_THRESHOLD = 4000;            // analog threshold
-    int  vibValue = analogRead(PIN_VIB);              // read SW-18010P analog
-    bool detected = (vibValue < VIB_THRESHOLD);       // true = vibration detected
+  // --- Vibration sensor reading ---
+  static const int VIB_THRESHOLD = 4000;    // analog threshold
+  int  vibValue = analogRead(PIN_VIB);      // read SW-18010P analog
+  bool detected = (vibValue < VIB_THRESHOLD);  // true = vibration detected
 
-    // --- NEW: 5-minute LOW hold for GPS_HIGH after any vibration ---
-    static bool     gpsLowHold      = true;          // are we currently holding LOW?
-    static uint32_t gpsLowStartMs   = 0;              // when the hold started
-    const  uint32_t GPS_LOW_HOLD_MS = 5UL * 1000UL;  // 5 seconds
+  // --- 30-minute GPS LOW hold logic ---
+  static uint32_t gpsLowStartMs = 0;
+  const uint32_t GPS_LOW_HOLD_MS = 30UL * 60UL * 1000UL; // 30 minutes = 1,800,000 ms
+  static bool gpsLowHold = false;
 
+  if (detected) {
+    // Whenever vibration occurs, start or refresh the 30-minute hold timer
+    gpsLowHold = true;
+    gpsLowStartMs = now;
+    if (digitalRead(GPS_HIGH) != LOW) {
+      Serial.println("[GPS_HIGH] Vibration detected → set LOW (GPS ON, start 30-min hold)");
+      digitalWrite(GPS_HIGH, LOW); // GPS ON
+    }
+  }
 
-    // Start/restart the 5-minute LOW hold whenever vibration is detected
-    // if (detected) {
-    //     if (!gpsLowHold) {
-    //         Serial.println("[GPS_HIGH] Vibration detected → start 5-min LOW hold");
-    //     } else {
-    //         Serial.println("[GPS_HIGH] Vibration detected → restart 5-min LOW hold");
-    //     }
-    //     gpsLowHold    = true;
-    //     gpsLowStartMs = now;
-    // }
-
-    // Apply the hold or release when time elapsed
-    if (gpsLowHold) {
-        digitalWrite(GPS_HIGH, LOW);
-        if (now - gpsLowStartMs >= GPS_LOW_HOLD_MS) {
-            gpsLowHold = false;
-            digitalWrite(GPS_HIGH, HIGH);
-            Serial.println("[GPS_HIGH] 5-minute window elapsed → set HIGH");
-        }
+  // Keep GPS ON (LOW) while within the 30-minute window
+  if (gpsLowHold) {
+    if (now - gpsLowStartMs < GPS_LOW_HOLD_MS) {
+      digitalWrite(GPS_HIGH, LOW); // maintain ON
     } else {
-        // No active hold → keep HIGH
-        digitalWrite(GPS_HIGH, HIGH);
+      // 30 minutes passed without new vibration
+      gpsLowHold = false;
+      digitalWrite(GPS_HIGH, HIGH); // turn GPS OFF
+      Serial.println("[GPS_HIGH] 30-minute window elapsed → set HIGH (GPS OFF)");
     }
+  } else {
+    // No hold active, GPS stays OFF
+    digitalWrite(GPS_HIGH, HIGH);
+  }
 
-    // --- Original send gating logic (unchanged) ---
-    if (detected) {
-        lastVibrationMs = now;                        // keep inactivity timer meaningful
-        if (now - lastSendMs >= LORA_SEND_INTERVAL) {
-            // Serial.println("[VIB] Vibration detected -> Sending LoRa packet");
-            sendLoRaPacket();
-            lastSendMs = now;                         // start cooldown
-        } //else {
-        //     Serial.println("[VIB] Ignored (still within cooldown)");
-        // }
+  // --- LoRa send gating logic ---
+  if (detected) {
+    lastVibrationMs = now; // record activity time
+    if (now - lastSendMs >= LORA_SEND_INTERVAL) {
+      sendLoRaPacket();
+      lastSendMs = now;
     }
+  }
 
-    // --- Periodic status print ---
-    {
-      static uint32_t lastVibPrintMs = 0;             // print once per second
-      if (now - lastVibPrintMs >= 1000) {
-        lastVibPrintMs = now;
+  // --- Magnetic switch reading ---
+// --- Magnetic switch reading with LoRa trigger ---
+static int lastDoorState = HIGH;  // assume open at boot
 
-        bool canSend  = (now - lastSendMs >= LORA_SEND_INTERVAL);
-        uint32_t cooldownMs  = canSend ? 0 : (LORA_SEND_INTERVAL - (now - lastSendMs));
-        uint32_t cooldownSec = (cooldownMs + 999) / 1000;
+int currentDoorState = digitalRead(magnetic);
 
-        uint32_t holdRemainMs  = 0;
-        if (gpsLowHold) {
-          uint32_t elapsed = now - gpsLowStartMs;
-          holdRemainMs = (elapsed >= GPS_LOW_HOLD_MS) ? 0 : (GPS_LOW_HOLD_MS - elapsed);
-        }
-        uint32_t holdRemainSec = (holdRemainMs + 999) / 1000;
+if (currentDoorState != lastDoorState) {
+  // State changed
+  doorState = (currentDoorState == LOW) ? 1 : 0;
 
-        // Serial.print("[VIB-STATUS] value=");
-        // Serial.print(vibValue);
-        // Serial.print(" thresh=");
-        // Serial.print(VIB_THRESHOLD);
-        // Serial.print(" | detected=");
-        // Serial.print(detected ? "YES" : "NO");
-        // Serial.print(" | GPS_HIGH=");
-        // Serial.print(gpsLowHold ? "LOW (holding)" : "HIGH");
-        // Serial.print(" | hold_left(s)=");
-        // Serial.print(gpsLowHold ? holdRemainSec : 0);
-        // Serial.print(" | can_send_now=");
-        // Serial.print(canSend ? "YES" : "NO");
-        // Serial.print(" | next_send_in=");
-        // Serial.print(canSend ? 0 : cooldownSec);
-        // Serial.println("s");
-      }
+  if (doorState == 1) {
+    Serial.println("[MAGNETIC] Switch Closed → Sending LoRa packet");
+  } else {
+    Serial.println("[MAGNETIC] Switch Open → Sending LoRa packet");
+  }
+
+  sendLoRaPacket();
+  lastDoorState = currentDoorState;  // remember new state
+}
+
+
+  // --- Optional status print once per second ---
+  static uint32_t lastStatus = 0;
+  if (now - lastStatus >= 1000) {
+    lastStatus = now;
+    uint32_t remain = 0;
+    if (gpsLowHold) {
+      remain = (GPS_LOW_HOLD_MS - (now - gpsLowStartMs)) / 1000;
     }
+    Serial.print("[STATUS] vib=");
+    Serial.print(vibValue);
+    Serial.print(" | detected=");
+    Serial.print(detected ? "YES" : "NO");
+    Serial.print(" | GPS_HIGH=");
+    Serial.print(digitalRead(GPS_HIGH) == LOW ? "LOW (GPS ON)" : "HIGH (OFF)");
+    Serial.print(" | hold_left(s)=");
+    Serial.println(gpsLowHold ? remain : 0);
+  }
 
-    // ACTIVE state behavior (kept minimal, only timer logic used)
-    if (state == ACTIVE) {
-        // If no vibration for 30 minutes -> back to PSM (IDLE)
-        if (now - lastVibrationMs >= INACTIVITY_PSM_MS) {
-            Serial.println("[IDLE] No vibration for 30 min. Entering GPS PSM.");
-            gpsEnterPSM();
-            gpsPowerOff();        // turn off if you use a high-side switch
-            state = IDLE;
-        }
+  // --- Inactivity power-save (optional, already covered by GPS logic) ---
+  if (state == ACTIVE) {
+    if (now - lastVibrationMs >= INACTIVITY_PSM_MS) {
+      Serial.println("[IDLE] No vibration for 30 min. Entering GPS PSM.");
+      gpsEnterPSM();
+      gpsPowerOff();
+      state = IDLE;
     }
+  }
 
-    // Light idle
-    delay(10);
-
-    // gps reading (your existing pretty print)
-    readGPSData();
+  delay(10);
+  readGPSData();
 }
