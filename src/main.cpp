@@ -1,3 +1,4 @@
+//ini main code
 #include <Arduino.h>
 #include <magnetic_read.h>
 #include <AHT_read.h>
@@ -212,6 +213,8 @@ void setup() {
   pinMode(GPS_HIGH, OUTPUT);
 
   pinMode(magnetic, INPUT_PULLUP);
+  uint32_t TransmitterID = (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF);
+  dataToSend.deviceID = TransmitterID;
 
 
 
@@ -395,6 +398,8 @@ void loop() {
   // --- 30-minute GPS LOW hold logic ---
   static uint32_t gpsLowStartMs = 0;
   const uint32_t GPS_LOW_HOLD_MS = 30UL * 60UL * 1000UL; // 30 minutes = 1,800,000 ms
+  // const uint32_t GPS_LOW_HOLD_MS = 3UL * 1000UL; // 3 seconds = 3,000 ms
+
   static bool gpsLowHold = false;
 
   if (detected) {

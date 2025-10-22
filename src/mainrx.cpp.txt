@@ -1,7 +1,9 @@
+//ini main code
 // ===== LoRa Receiver (Enhanced) =====
 #include <SPI.h>
 #include <LoRa.h>
-// #include <WiFi.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 // #include <PubSubClient.h>
 #ifndef LORA_NSS_PIN
   #define LORA_NSS_PIN LORA_SS   // or replace with `ss` if that’s your symbol
@@ -11,7 +13,7 @@
 #define LORA_RST   13
 #define LORA_DIO0  25
 #define LORA_FREQ  923E6
-#define LORA_SYNC  0xF3
+#define LORA_SYNC  0x34
 
 #define DEBUG 1
 #if DEBUG
@@ -23,6 +25,7 @@
 // If your sender uses packed structs, match packing:
 #pragma pack(push,1)
 struct LoRaData {
+  uint32_t deviceID;
   uint8_t  packetCounter;
   double   latitude;
   double   longitude;
@@ -30,20 +33,59 @@ struct LoRaData {
   float    speed;
   uint8_t  satellites;
   char     timeUTC[20];  // enough for "YYYY/MM/DD,HH:MM:SS" + '\0'
-  bool     doorValue
+  bool     doorValue;
 };
 #pragma pack(pop)
 
 
 LoRaData receivedData;
 
-// // MQTT bits if you re-enable later
-// const char* ssid = "alyaone";
-// const char* password = "apayalupa";
-// const char* mqtt_server = "172.20.10.5";
-// const int   mqtt_port   = 1883;
-// WiFiClient espClient;
-// PubSubClient client(espClient);
+const char* WIFI_SSID = "alyaone";
+const char* WIFI_PASS = "apayalupa";
+
+// InfluxDB v2
+const char* INFLUX_URL = "http://172.20.10.5:8086";
+const char* INFLUX_ORG    = "my-org";
+const char* INFLUX_BUCKET = "smart-ecoport";
+const char* INFLUX_TOKEN  = "my-super-token";
+
+static void connectWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) {
+    delay(300); Serial.print('.');
+  }
+  Serial.println(WiFi.status()==WL_CONNECTED ? "\nWiFi OK" : "\nWiFi FAIL");
+    if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("ESP32 IP: ");
+    Serial.println(WiFi.localIP());
+  }
+
+}
+
+static bool writeToInfluxDB(const String& lineProtocol) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  String url = String(INFLUX_URL) + "/api/v2/write?org=" + INFLUX_ORG +
+               "&bucket=" + INFLUX_BUCKET + "&precision=ms";
+  HTTPClient http;
+  http.begin(url);
+  http.setTimeout(10000);
+  http.setReuse(false);
+  http.addHeader("Connection","close");
+  // http.useHTTP10(true); // aktifkan bila koneksi kadang hang / proxy rewel
+
+  http.addHeader("Content-Type", "text/plain; charset=utf-8");
+  http.addHeader("Authorization", String("Token ") + INFLUX_TOKEN);
+  int code = http.POST(lineProtocol);
+  bool ok = (code >= 200 && code < 300);
+  if (!ok) { Serial.printf("Influx ERR %d: %s\n", code, http.getString().c_str()); }
+  http.end();
+  return ok;
+}
+
 
 // ------------ Helpers ------------
 static void hexDump(const uint8_t* buf, int len) {
@@ -128,6 +170,7 @@ void setup() {
   // LoRa.receive();
 
   // Otherwise, if you poll with LoRa.parsePacket() in loop(), no extra call needed.
+  connectWiFi();
 }
 
 
@@ -163,43 +206,56 @@ void loop() {
       Serial.print("\n------ Receive Data Packet #");
       Serial.print(receivedData.packetCounter);
       Serial.println(" ------");
+      Serial.print("Add: "); Serial.println(receivedData.deviceID);
       Serial.print("Lat: ");  Serial.println(receivedData.latitude, 6);
       Serial.print("Lon: ");  Serial.println(receivedData.longitude, 6);
       Serial.print("Alt: ");  Serial.print(receivedData.altitude, 2); Serial.println(" m");
       Serial.print("Spd: ");  Serial.print(receivedData.speed, 2);    Serial.println(" km/h");
       Serial.print("Sats: "); Serial.println(receivedData.satellites);
       Serial.print("Time: "); Serial.println(receivedData.timeUTC);
-      Serial.print("Door: "); 
-      if (dataToSend.doorValue) {
-      Serial.println("Switch Closed");
-    } else {
-      Serial.println("Switch Open");
-    }
+      Serial.print("Door: "); Serial.println(receivedData.doorValue ? "Switch Closed" : "Switch Open");
+
       Serial.println("---------------------------------------------");
 
-      // // Build JSON (compact)
-      // String payload = "{";
-      // payload += "\"packetCounter\":" + String(receivedData.packetCounter) + ",";
-      // payload += "\"latitude\":"      + String(receivedData.latitude, 6) + ",";
-      // payload += "\"longitude\":"     + String(receivedData.longitude, 6) + ",";
-      // payload += "\"altitude\":"      + String(receivedData.altitude, 2) + ",";
-      // payload += "\"speed\":"         + String(receivedData.speed, 2) + ",";
-      // payload += "\"satellites\":"    + String(receivedData.satellites) + ",";
-      // payload += "\"timeUTC\":\""     + String(receivedData.timeUTC) + "\",";
-      // payload += "\"rssi\":"          + String(rssi) + ",";
-      // payload += "\"snr\":"           + String(snr,1);
-      // payload += "}";
+        // ---- Build JSON (untuk debugging / subsystems lain) ----
+String json = "{";
+  json += "\"deviceID\":" + String(receivedData.deviceID) + ",";
+  json += "\"packetCounter\":" + String(receivedData.packetCounter) + ",";
+  json += "\"rssi\":" + String(rssi) + ",";
+  json += "\"snr\":" + String(snr,1) + ",";
+  json += "\"door\":" + String(receivedData.doorValue ? "true" : "false") + ",";
+  json += "\"gps\":{";
+    json += "\"lat\":" + String(receivedData.latitude, 6) + ",";
+    json += "\"lon\":" + String(receivedData.longitude, 6) + ",";
+    json += "\"alt\":" + String(receivedData.altitude, 2) + ",";
+    json += "\"speed\":" + String(receivedData.speed, 2) + ",";
+    json += "\"sats\":" + String((int)receivedData.satellites) + ",";
+    json += "\"timeUTC\":\"" + String(receivedData.timeUTC) + "\"";
+  json += "}";
+json += "}";
+Serial.println("JSON:");
+Serial.println(json);
 
-      // Serial.println("JSON:");
-      // Serial.println(payload);
+// ---- InfluxDB line protocol (telemetry) ----
+String lp; lp.reserve(256);
+lp  = "telemetry";
+lp += ",device="; lp += String(receivedData.deviceID);
+lp += " ";
+lp += "packetCounter="; lp += String((int)receivedData.packetCounter); lp += "i,";
+lp += "rssi=";          lp += String((int)rssi); lp += "i,";
+lp += "snr=";           lp += String(snr,1); lp += ",";
+lp += "door=";          lp += (receivedData.doorValue ? "true" : "false"); lp += ",";
+lp += "lat=";           lp += String(receivedData.latitude, 6); lp += ",";
+lp += "lon=";           lp += String(receivedData.longitude, 6); lp += ",";
+lp += "alt=";           lp += String(receivedData.altitude, 2); lp += ",";
+lp += "speed=";         lp += String(receivedData.speed, 2); lp += ",";
+lp += "sats=";          lp += String((int)receivedData.satellites); lp += "i";
 
-      // // Publish to MQTT (uncomment when ready)
-      // if (client.publish("supplychain/containers", payload.c_str())) {
-      //   Serial.println("📤 MQTT published");
-      // } else {
-      //   Serial.println("❌ MQTT publish failed");
-      // }
-
+if (!writeToInfluxDB(lp)) {
+  Serial.println("❌ Influx write failed");
+} else {
+  Serial.println("✅ Influx write OK");
+}
     } else {
       Serial.println("Error: struct read incomplete. Dumping raw:");
       // read any remaining bytes (already drained above) then print what we got

@@ -91,6 +91,7 @@ float acetonPPM = 0;
 // Define a structure to hold your data
 #pragma pack(push,1)
 struct LoRaData {
+  uint32_t deviceID;
   uint8_t  packetCounter;
   double   latitude;
   double   longitude;
