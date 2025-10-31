@@ -443,18 +443,17 @@ static int lastDoorState = HIGH;  // assume open at boot
 int currentDoorState = digitalRead(magnetic);
 
 if (currentDoorState != lastDoorState) {
-  // State changed
   doorState = (currentDoorState == LOW) ? 1 : 0;
 
-  if (doorState == 1) {
+  if (doorState == 1)
     Serial.println("[MAGNETIC] Switch Closed → Sending LoRa packet");
-  } else {
+  else
     Serial.println("[MAGNETIC] Switch Open → Sending LoRa packet");
-  }
 
   sendLoRaPacket();
-  lastDoorState = currentDoorState;  // remember new state
+  lastDoorState = currentDoorState;
 }
+
 
 
   // --- Optional status print once per second ---
